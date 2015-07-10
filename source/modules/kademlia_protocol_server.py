@@ -84,7 +84,6 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
     def find_node_reply(self):
         # TODO: change 20 to a global constant K
         nodes = self.buckets.get_closest_nodes(self.req['Key'], 20)
-        
         res = self.prepare_reply('FIND_STORE_REPLY')
         pass
 
