@@ -18,11 +18,11 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
         self.logger.debug('__init__')
         
         # key -> RPC identifier, value -> [RPC handler, [keys the bson obj should have]]
-        self.RPCs = { 'PING': [self.ping, ['MID', 'SID', 'RID']],
-                      'STORE': [self.store, ['MID', 'SID', 'RID', 'Key', 'TTL', 'Value']],
-                      'FIND_NODE': [self.find_node, ['MID', 'SID', 'RID', 'KX_INFO', 'Key']],
-                      'FIND_VALUE': [self.find_value, ['MID', 'SID', 'RID', 'Key']],
-                      'VERIFY': [self.verify, ['MID', 'SID', 'RID', 'Challenge']] }
+        self.RPCs = { 'PING': [self.pong, ['MID', 'SID', 'RID']],
+                      'STORE': [self.store_reply, ['MID', 'SID', 'RID', 'Key', 'TTL', 'Value']],
+                      'FIND_NODE': [self.find_node_reply, ['MID', 'SID', 'RID', 'KX_INFO', 'Key']],
+                      'FIND_VALUE': [self.find_value_reply, ['MID', 'SID', 'RID', 'Key']],
+                      'VERIFY': [self.verify_reply, ['MID', 'SID', 'RID', 'Challenge']] }
 
         SocketServer.BaseRequestHandler.__init__(self, request, client_address, server)
 
@@ -42,6 +42,7 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
             # TODO: handle non-valid request
             res = { 'error': True, 'message': error_msg }
             socket.sendto(dumps(res), self.client_address)
+            return
 
         RPC_handler = self.RPCs[self.RPC_id][0]
         res = RPC_handler()
@@ -67,10 +68,10 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
 
         return True, ''
         
-    def ping(self):
+    def pong(self):
         pass
         
-    def store(self):
+    def store_reply(self):
         res = dict()
         res['TYPE'] = 'STORE_REPLY'
         res['MID'] = self.req['MID']
@@ -83,13 +84,13 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
 
         return res
 
-    def find_node(self):
+    def find_node_reply(self):
         pass
 
-    def find_value(self):
+    def find_value_reply(self):
         pass
 
-    def verify(self):
+    def verify_reply(self):
         pass
 
     def finish(self):
