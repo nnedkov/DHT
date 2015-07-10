@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
-DEBUG_MODE = True
+import logging
+LOG_LEVEL = logging.DEBUG
 CONFIG_PATH = '../config/dht.conf'
 SHUT_DOWN = 0
 

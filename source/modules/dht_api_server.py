@@ -3,21 +3,20 @@
 from time import sleep
 import logging
 import SocketServer
-from utilities import debug_print
+
 import config
 
 
-logging.basicConfig(level=logging.DEBUG,
-                    format='%(name)s: %(message)s',
-                    )
+logging.basicConfig(level=config.LOG_LEVEL,
+                    format='%(name)s: %(message)s',)
 
-class ModuleAPIRequestHandler(SocketServer.BaseRequestHandler):
-    
+
+class DHTAPIRequestHandler(SocketServer.BaseRequestHandler):
+
     def __init__(self, request, client_address, server):
-        self.logger = logging.getLogger('ModuleAPIRequestHandler')
+        self.logger = logging.getLogger('DHTAPIRequestHandler')
         self.logger.debug('__init__')
         SocketServer.BaseRequestHandler.__init__(self, request, client_address, server)
-        return
 
     def setup(self):
         self.logger.debug('setup')
@@ -28,45 +27,41 @@ class ModuleAPIRequestHandler(SocketServer.BaseRequestHandler):
 
         # Echo the back to the client
         data = self.request.recv(1024)
-        self.logger.debug('recv()->"%s"', data)
-        self.request.send(data)
-        return
+        self.logger.debug("recv()->'%s'", data)
+        self.request.send(data.upper())
 
     def finish(self):
         self.logger.debug('finish')
         return SocketServer.BaseRequestHandler.finish(self)
 
-class ModuleAPIServer(SocketServer.TCPServer):
-    
-    def __init__(self, server_address, handler_class=ModuleAPIRequestHandler):
-        self.logger = logging.getLogger('ModuleAPIServer')
+
+class DHTAPIServer(SocketServer.TCPServer):
+
+    def __init__(self, server_address, handler_class=DHTAPIRequestHandler):
+        self.logger = logging.getLogger('DHTAPIServer')
         self.logger.debug('__init__')
         SocketServer.TCPServer.__init__(self, server_address, handler_class)
-        return
 
     def server_activate(self):
         self.logger.debug('server_activate')
         SocketServer.TCPServer.server_activate(self)
-        return
 
     def serve_forever(self, queue):
-        debug_print("Warm Hello from module_api_server! :)")
         self.logger.debug('waiting for request')
-        self.logger.info('Handling requests, press <Ctrl-C> to quit')
+
         while True:
             if config.SHUT_DOWN == 1:
-                debug_print("module_api_server: going to exit")
+                self.logger.info('going to exit')
                 break
-        
-            debug_print("module_api_server: going to sleep for a bit (SHUT_DOWN = %d)" % config.SHUT_DOWN)
+
+            self.logger.debug('taking a small nap')
             sleep(2)
             self.handle_request()
-    
-        debug_print("module_api_server: exiting")
+
+        self.logger.info('exiting')
+
         result = (True, None)
         queue.put(result)
-            
-        return
 
     def handle_request(self):
         self.logger.debug('handle_request')
@@ -92,20 +87,21 @@ class ModuleAPIServer(SocketServer.TCPServer):
         self.logger.debug('close_request(%s)', request_address)
         return SocketServer.TCPServer.close_request(self, request_address)
 
+
 if __name__ == '__main__':
-    import socket
-    from threading import Thread
     from Queue import Queue
+    from threading import Thread
+    import socket
 
     queue = Queue()
     address = (config.HOSTNAME, config.PORT)
-    server = ModuleAPIServer(address, ModuleAPIRequestHandler)
+    server = DHTAPIServer(address, DHTAPIRequestHandler)
 
     t = Thread(target=server.serve_forever, args=(queue, ))
-    t.setDaemon(True) # don't hang on exit
+    t.setDaemon(True)   # terminate when the main thread ends
     t.start()
 
-    logger = logging.getLogger('client')
+    logger = logging.getLogger('Client')
     logger.info('Server on %s:%s', config.HOSTNAME, config.PORT)
 
     # Connect to the server
@@ -122,7 +118,7 @@ if __name__ == '__main__':
     # Receive a response
     logger.debug('waiting for response')
     response = s.recv(len_sent)
-    logger.debug('response from server: "%s"', response)
+    logger.debug("response from server: '%s'", response)
 
     # Clean up
     logger.debug('closing socket')

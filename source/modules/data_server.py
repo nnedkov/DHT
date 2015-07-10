@@ -1,25 +1,42 @@
 #!/usr/bin/python
 
 from time import sleep
+import logging
 
-from utilities import debug_print
 import config
+
+
+logging.basicConfig(level=config.LOG_LEVEL,
+                    format='%(name)s: %(message)s',)
+
+logger = logging.getLogger('DataServer')
 
 
 def data_server(queue):
 
-    debug_print("Warm Hello from data_server! :)")
-    
+    logger.debug('activating')
+
     while True:
 
         if config.SHUT_DOWN == 1:
-            debug_print("data_server: going to exit")
+            logger.info('going to exit')
             break
 
-        debug_print("data_server: going to sleep for a bit")
+        logger.debug('taking a small nap')
         sleep(5)
 
-    debug_print("data_server: exiting")
+    logger.info('exiting')
 
     result = (True, None)
     queue.put(result)
+
+
+if __name__ == '__main__':
+    from Queue import Queue
+    from threading import Thread
+
+    queue = Queue()
+    t = Thread(target=data_server, args=(queue, ))
+    t.setDaemon(True)   # terminate when the main thread ends
+    t.start()
+    sleep(10)
