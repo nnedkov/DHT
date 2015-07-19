@@ -13,10 +13,10 @@ logging.basicConfig(level=config.LOG_LEVEL,
 
 class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
 
-    def __init__(self, request, client_address, server):
+    def __init__(self, request, client_address, server, buckets):
         self.logger = logging.getLogger('KademliaProtocolRequestHandler')
         self.logger.debug('__init__')
-        
+        self.buckets = buckets
         # key -> RPC identifier, value -> [RPC handler, [keys the bson obj should have]]
         self.RPCs = { 'PING': [self.pong, ['MID', 'SID', 'RID']],
                       'STORE': [self.store_reply, ['MID', 'SID', 'RID', 'Key', 'TTL', 'Value']],
@@ -65,18 +65,15 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
             # TODO: verify value types
             if not self.req.has_key(key):
                 return False, 'request with required keys missing'
-
+        # TODO: verify SID/RID combination
         return True, ''
         
     def pong(self):
-        pass
+        res = self.prepare_reply('PONG')
+        return res
         
     def store_reply(self):
-        res = dict()
-        res['TYPE'] = 'STORE_REPLY'
-        res['MID'] = self.req['MID']
-        res['SID'] = self.req['RID']
-        res['RID'] = self.req['SID']
+        res = self.prepare_reply('STORE_REPLY')
         # TODO: uncomment below when data server interface is ready
         # status = store_value(self.req['Key'], self.req['Value'], self.req['TTL'])
         # res['Status'] = status
@@ -85,24 +82,40 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
         return res
 
     def find_node_reply(self):
+        # TODO: change 20 to a global constant K
+        nodes = self.buckets.get_closest_nodes(self.req['Key'], 20)
+        
+        res = self.prepare_reply('FIND_STORE_REPLY')
         pass
 
     def find_value_reply(self):
+        res = self.prepare_reply('FIND_VALUE_REPLY')
         pass
 
     def verify_reply(self):
+        res = self.prepare_reply('VERIFY_REPLY')
         pass
+
+    def prepare_reply(self, msg_type):
+        res = dict()
+        res['TYPE'] = msg_type
+        res['MID'] = self.req['MID']
+        res['SID'] = self.req['RID']
+        res['RID'] = self.req['SID']
+        return res
 
     def finish(self):
         self.logger.debug('finish')
         return SocketServer.BaseRequestHandler.finish(self)
+
 
 class KademliaProtocolServer(SocketServer.UDPServer):
 
     def __init__(self, server_address, handler_class=KademliaProtocolRequestHandler):
         self.logger = logging.getLogger('KademliaProtocolServer')
         self.logger.debug('__init__')
-        SocketServer.UDPServer.__init__(self, server_address, handler_class)
+        self.buckets = buckets("1BCD77AFF8391729182DC63AFFFFF319000567AA",160,20)
+        SocketServer.UDPServer.__init__(self, server_address, handler_class, buckets)
 
     def server_activate(self):
         self.logger.debug('server_activate')
