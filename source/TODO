@@ -1,15 +1,18 @@
 High priority:
-* (ELIAS) update your git-author-name by running: git config --global user.name "Elias Hazboun" (current name is "Elias Hazbou")
-* (ELIAS) complete functionality for ping - find_node - find_value - verify in file kademlia_protocol_server.py
-	Comments: - test your added functionality by adding test code under "if __name__ == '__main__'", check example
-			  - run tests by executing: python kademlia_protocol_server.py
-			  - don't forger to follow the defined git workflow (git_workflow.txt)
-* (maybe ELIAS) build data server (data_server.py): create k-buckets data structure, provide CRUD (create-read-update-delete) operations API
 
-* (NEDKO) write functionality for DHTAPIServer (request parsing - handling - responding)
-* (NEDKO) write functionality for TODO request-for-functionality comments
+	ELIAS:
+		* complete functionality for ping - find_node - find_value - verify in file kademlia_protocol_server.py
+		* Comments: - test your added functionality by adding test code under "if __name__ == '__main__'", check example
+					- run tests by executing: python kademlia_protocol_server.py
+					- don't forger to follow the defined git workflow (git_workflow.txt)
+		* create k-buckets data structure, provide CRUD (create-read-update-delete) operations API
+
+	NEDKO:
+		* seperate modules/refactoring
+		* write functionality for DHTAPIServer (KX request parsing - handling - responding)
 
 
 
 Low priority:
 * bash script that installs all required packages
+

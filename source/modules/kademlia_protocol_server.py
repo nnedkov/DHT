@@ -3,6 +3,7 @@
 from bson.json_util import dumps, loads
 import logging
 import SocketServer
+import Queue
 
 import config
 
@@ -13,10 +14,13 @@ logging.basicConfig(level=config.LOG_LEVEL,
 
 class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
 
-    def __init__(self, request, client_address, server, buckets):
+    def __init__(self, request, client_address, server):
         self.logger = logging.getLogger('KademliaProtocolRequestHandler')
         self.logger.debug('__init__')
-        self.buckets = buckets
+        self.request_q = request_q
+        self.response_q = response_q
+        self.err_q = err_q
+        #self.buckets = buckets
         # key -> RPC identifier, value -> [RPC handler, [keys the bson obj should have]]
         self.RPCs = { 'PING': [self.pong, ['MID', 'SID', 'RID']],
                       'STORE': [self.store_reply, ['MID', 'SID', 'RID', 'Key', 'TTL', 'Value']],
@@ -60,18 +64,18 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
             _, required_keys = self.RPCs[self.RPC_id]
         except KeyError:
             return False, 'request with no specified type'
-        
+
         for key in required_keys:
             # TODO: verify value types
             if not self.req.has_key(key):
                 return False, 'request with required keys missing'
         # TODO: verify SID/RID combination
         return True, ''
-        
+
     def pong(self):
         res = self.prepare_reply('PONG')
         return res
-        
+
     def store_reply(self):
         res = self.prepare_reply('STORE_REPLY')
         # TODO: uncomment below when data server interface is ready
@@ -83,7 +87,7 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
 
     def find_node_reply(self):
         # TODO: change 20 to a global constant K
-        nodes = self.buckets.get_closest_nodes(self.req['Key'], 20)
+        #nodes = self.buckets.get_closest_nodes(self.req['Key'], 20)
         res = self.prepare_reply('FIND_STORE_REPLY')
         pass
 
@@ -110,30 +114,71 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
 
 class KademliaProtocolServer(SocketServer.UDPServer):
 
-    def __init__(self, server_address, handler_class=KademliaProtocolRequestHandler):
+    def __init__(self,
+                 request_q,
+                 response_q,
+                 err_q,
+                 server_address,
+                 handler_class=KademliaProtocolRequestHandler):
         self.logger = logging.getLogger('KademliaProtocolServer')
         self.logger.debug('__init__')
-        self.buckets = buckets("1BCD77AFF8391729182DC63AFFFFF319000567AA",160,20)
-        SocketServer.UDPServer.__init__(self, server_address, handler_class, buckets)
+        self.thread_name = 'KademliaProtocolServer'
+        self.request_q = request_q
+        self.response_q = response_q
+        self.err_q = err_q
+        #self.buckets = buckets("1BCD77AFF8391729182DC63AFFFFF319000567AA",160,20)
+        SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
     def server_activate(self):
         self.logger.debug('server_activate')
         SocketServer.UDPServer.server_activate(self)
 
-    def serve_forever(self, queue):
-        self.logger.debug('waiting for request')
+    def serve_forever(self):
+        self.logger.debug('waiting for requests')
 
-        while True:
-            if config.SHUT_DOWN == 1:
-                self.logger.info('going to exit')
-                break
+        # Timeout duration, measured in seconds. If handle_request() receives
+        # no incoming requests within the timeout period, handle_request() will
+        # return. It essentially makes handle_request() non-blocking.
+        self.timeout = 1
 
-            self.handle_request()
+        # As long as we haven't received an EXIT signal, read the request queue
+        # for requests from dht (from the higher level). In addition, serve any
+        # incoming kademlia requests from other peers (read socket for that).
+        # The reading of the queue is with a blocking 'get', so no CPU cycles
+        # are wasted while waiting. Also, 'get' is given a timeout, so the
+        # SHUT_DOWN flag is always checked, even if there's nothing in the
+        # queue.
+        while not config.SHUT_DOWN:
 
-        self.logger.info('exiting')
+            try:
+                request = self.request_q.get(True, 0.05)
+                response = self.process_dht_request(request)
+                self.response_q.put(response)
+            except Queue.Empty:
+                pass
+            except Exception as e:
+                exception = (e, self.thread_name)
+                err_q.put(exception)
 
-        result = (True, None)
-        queue.put(result)
+
+            try:
+                self.handle_request()
+            except Exception as e:
+                exception = (e, self.thread_name)
+                self.err_q.put(exception)
+
+        self.logger.info('shutting down...')
+        # self.socket.close()
+
+    def process_dht_request(self, request):
+        self.logger.debug('process_dht_request')
+        self.logger.debug('received dht request: %s' % str(request))
+        # TODO: add functionality for request processing
+        status = True
+        message = 'Response from kademlia_protocol_server (for request: %s)' % request
+        response = (status, message)
+
+        return response
 
     def handle_request(self):
         self.logger.debug('handle_request')
@@ -141,11 +186,15 @@ class KademliaProtocolServer(SocketServer.UDPServer):
 
     def verify_request(self, request, client_address):
         self.logger.debug('verify_request(%s, %s)', request, client_address)
-        return SocketServer.UDPServer.verify_request(self, request, client_address)
+        return SocketServer.UDPServer.verify_request(self,
+                                                     request,
+                                                     client_address)
 
     def process_request(self, request, client_address):
         self.logger.debug('process_request(%s, %s)', request, client_address)
-        return SocketServer.UDPServer.process_request(self, request, client_address)
+        return SocketServer.UDPServer.process_request(self,
+                                                      request,
+                                                      client_address)
 
     def server_close(self):
         self.logger.debug('server_close')
@@ -153,33 +202,43 @@ class KademliaProtocolServer(SocketServer.UDPServer):
 
     def finish_request(self, request, client_address):
         self.logger.debug('finish_request(%s, %s)', request, client_address)
-        return SocketServer.UDPServer.finish_request(self, request, client_address)
+        return SocketServer.UDPServer.finish_request(self,
+                                                     request,
+                                                     client_address)
 
     def close_request(self, request_address):
         self.logger.debug('close_request(%s)', request_address)
         return SocketServer.UDPServer.close_request(self, request_address)
 
 if __name__ == '__main__':
-    from Queue import Queue
+
     from threading import Thread
     import socket
+    from time import sleep
 
-    queue = Queue()
+    request_q = Queue.Queue()
+    response_q = Queue.Queue()
+    err_q = Queue.Queue()
     address = (config.HOSTNAME, config.PEER_PORT)
-    server = KademliaProtocolServer(address, KademliaProtocolRequestHandler)
+    server = KademliaProtocolServer(request_q,
+                                    response_q,
+                                    err_q,
+                                    address,
+                                    KademliaProtocolRequestHandler)
 
-    t = Thread(target=server.serve_forever, args=(queue, ))
-    t.setDaemon(True)   # terminate when the main thread ends
+    t = Thread(target=server.serve_forever)
+    #t.setDaemon(True)   # terminate when the main thread ends
     t.start()
 
+    # Test kademlia request handling from a peer
     logger = logging.getLogger('Client')
-    logger.info('Server on %s:%s', config.HOSTNAME, config.PEER_PORT)
+    logger.info('Server on %s:%s', address[0], address[1])
 
     # Connect to the server
     logger.debug('creating socket')
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     logger.debug('connecting to server')
-    s.connect((config.HOSTNAME, config.PEER_PORT))
+    s.connect(address)
 
     # Send the data
     store_req = {'TYPE': 'STORE',
@@ -201,5 +260,7 @@ if __name__ == '__main__':
     # Clean up
     logger.debug('closing socket')
     s.close()
+    config.SHUT_DOWN = 1
+    sleep(3)
     logger.debug('done')
     server.socket.close()
