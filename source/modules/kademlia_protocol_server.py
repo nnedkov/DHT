@@ -91,7 +91,7 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
 
     def find_node_reply(self):
         # TODO: change 20 to a global constant K
-        nodes = self.buckets.get_closest_nodes(self.req['Key'], 20)
+        #nodes = self.buckets.get_closest_nodes(self.req['Key'], 20)
         res = self.prepare_reply('FIND_STORE_REPLY')
         pass
 
@@ -118,7 +118,6 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
 
 class KademliaProtocolServer(SocketServer.UDPServer):
 
-    #
     def __init__(self,
                  request_q,
                  response_q,
@@ -131,7 +130,7 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         self.request_q = request_q
         self.response_q = response_q
         self.err_q = err_q
-        #self.buckets = Buckets("1BCD77AFF8391729182DC63AFFFFF319000567AA", 160, 20)
+        #self.buckets = buckets("1BCD77AFF8391729182DC63AFFFFF319000567AA",160,20)
         SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
     def server_activate(self):

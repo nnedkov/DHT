@@ -102,7 +102,6 @@ def init_servers():
             raise error
         except Empty:
             continue
-
     logger.info('Some signal for exit was received. Waiting threads to exit')
 
     for t in threads:
