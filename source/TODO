@@ -2,16 +2,12 @@ High priority:
 
 	ELIAS:
 		* complete functionality for ping - find_node - find_value - verify in file kademlia_protocol_server.py
+		* add functionality in maintain_til_shutdown function (maintenance of buckets)
 
 	NEDKO:
-		* add thread for k-buckets maintenance
 		* when receiving store-reply, pong, etc push it to the DHT layer
 		* write functionality for DHTAPIServer (KX request parsing - responding)
 		* seperate modules/refactoring
-		* add instances of buckets and DataServer
-		* add a ping to the oldest unuesed peer in buckets.py
-		* spawn thread for kbuckets maintenance
-		* ping function where should be called (from add_node kbuckets)
 
 
 

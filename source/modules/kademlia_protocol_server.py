@@ -4,7 +4,8 @@ from bson.json_util import dumps, loads
 import logging
 import SocketServer
 import Queue
-from buckets import Buckets
+from threading import Thread
+import buckets
 from data_server import DataServer
 
 import config
@@ -12,6 +13,27 @@ import config
 
 logging.basicConfig(level=config.LOG_LEVEL,
                     format='%(name)s: %(message)s',)
+
+
+
+def kbuckets_maintainer(buckets, err_q):
+
+    def maintain_til_shutdown(buckets):
+        while not config.SHUT_DOWN:
+            # TODO: set ping flags in the kbuckets - ping peers
+            logger.debug('sleeping for a bit')
+            sleep(3)
+
+    logger = logging.getLogger('kbuckets_maintainer')
+    logger.debug('starting maintainance')
+    thread_name = 'kbuckets_maintainer'
+
+    try:
+        maintain_til_shutdown(buckets)
+    except Exception as e:
+        logger.debug('Exception occured: %s' % str(e))
+        exception = (e, thread_name)
+        err_q.put(exception)
 
 
 class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
@@ -113,6 +135,26 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
         res['RID'] = self.req['SID']
         return res
 
+    @staticmethod
+    def ping(x):
+        pass
+
+    @staticmethod
+    def store(x):
+        pass
+
+    @staticmethod
+    def find_node(x):
+        pass
+
+    @staticmethod
+    def find_value(x):
+        pass
+
+    @staticmethod
+    def verify(x):
+        pass
+
     def finish(self):
         self.logger.debug('finish')
         return SocketServer.BaseRequestHandler.finish(self)
@@ -132,8 +174,12 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         self.request_q = request_q
         self.response_q = response_q
         self.err_q = err_q
-        self.buckets = Buckets('1BCD77AFF8391729182DC63AFFFFF319000567AA', 160, 20)
+        self.buckets = buckets.Buckets('1BCD77AFF8391729182DC63AFFFFF319000567AA', 160, 20)
         self.data_server = DataServer()
+
+        self.kbuckets_maintainer = Thread(target=kbuckets_maintainer, args=(self.buckets, self.err_q))
+        self.kbuckets_maintainer.start()
+
         SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
     def server_activate(self):
@@ -148,6 +194,7 @@ class KademliaProtocolServer(SocketServer.UDPServer):
             exception = (e, self.thread_name)
             self.err_q.put(exception)
 
+        self.kbuckets_maintainer.join()
         self.socket.close()
 
     def serve_til_shutdown(self):

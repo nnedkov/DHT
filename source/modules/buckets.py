@@ -3,6 +3,7 @@
 import logging
 from collections import OrderedDict
 import itertools
+import kademlia_protocol_server
 
 import config
 
@@ -33,6 +34,7 @@ class Buckets:
             elif len(self.buckets[index]) >= self.ksize:
                 oldest_unused = self.buckets.items()[0]
                 #TODO: Ping oldest_unused and check reply
+                kademlia_protocol_server.KademliaProtocolRequestHandler.ping()
                 return False
             else:
                 self.buckets[index][id] = node
