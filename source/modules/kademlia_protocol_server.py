@@ -4,6 +4,7 @@ from bson.json_util import dumps, loads
 import logging
 import SocketServer
 import Queue
+import buckets
 
 import config
 
@@ -74,20 +75,23 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
 
     def pong(self):
         res = self.prepare_reply('PONG')
+        #buckets.add_refresh_node(self.req['SID'])
         return res
 
     def store_reply(self):
         res = self.prepare_reply('STORE_REPLY')
-        # TODO: uncomment below when data server interface is ready
-        # status = store_value(self.req['Key'], self.req['Value'], self.req['TTL'])
-        # res['Status'] = status
-        res['Status'] = 0   # fake success
-
-        return res
+        if self.req['TTL'] > 43200:  # Max duration
+            res['Status'] = -1
+            return res
+        else:
+            # status = data_server.add(self.req['Key'], self.req['Value'], self.req['TTL'])
+            # res['Status'] = status
+            res['Status'] = 0   # fake success
+            return res
 
     def find_node_reply(self):
         # TODO: change 20 to a global constant K
-        #nodes = self.buckets.get_closest_nodes(self.req['Key'], 20)
+        nodes = self.buckets.get_closest_nodes(self.req['Key'], 20)
         res = self.prepare_reply('FIND_STORE_REPLY')
         pass
 
@@ -114,6 +118,7 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
 
 class KademliaProtocolServer(SocketServer.UDPServer):
 
+    #
     def __init__(self,
                  request_q,
                  response_q,
@@ -126,7 +131,7 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         self.request_q = request_q
         self.response_q = response_q
         self.err_q = err_q
-        #self.buckets = buckets("1BCD77AFF8391729182DC63AFFFFF319000567AA",160,20)
+        #self.buckets = Buckets("1BCD77AFF8391729182DC63AFFFFF319000567AA", 160, 20)
         SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
     def server_activate(self):
