@@ -8,7 +8,6 @@ High priority:
 		* when receiving store-reply, pong, etc push it to the DHT layer
 		* write functionality for DHTAPIServer (KX request parsing - responding)
 		* seperate modules/refactoring
-		* write functionality for DHTAPIServer (KX request parsing - handling - responding)
 		* add instances of buckets and DataServer
 		* add a ping to the oldest unuesed peer in buckets.py
 		* spawn thread for kbuckets maintenance

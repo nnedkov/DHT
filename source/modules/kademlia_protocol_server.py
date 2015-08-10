@@ -4,7 +4,8 @@ from bson.json_util import dumps, loads
 import logging
 import SocketServer
 import Queue
-import buckets
+from buckets import Buckets
+from data_server import DataServer
 
 import config
 
@@ -21,7 +22,6 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
         self.request_q = request_q
         self.response_q = response_q
         self.err_q = err_q
-        #self.buckets = buckets
         # key -> RPC identifier, value -> [RPC handler, [keys the bson obj should have]]
         self.RPCs = { 'PING': [self.pong, ['MID', 'SID', 'RID']],
                       'STORE': [self.store_reply, ['MID', 'SID', 'RID', 'Key', 'TTL', 'Value']],
@@ -36,6 +36,8 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
         return SocketServer.BaseRequestHandler.setup(self)
 
     def handle(self):
+        self.buckets = self.server.buckets
+        self.data_server = self.server.data_server
         self.logger.debug('handle')
 
         self.req = self.request[0].strip()
@@ -130,7 +132,8 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         self.request_q = request_q
         self.response_q = response_q
         self.err_q = err_q
-        #self.buckets = buckets("1BCD77AFF8391729182DC63AFFFFF319000567AA",160,20)
+        self.buckets = Buckets('1BCD77AFF8391729182DC63AFFFFF319000567AA', 160, 20)
+        self.data_server = DataServer()
         SocketServer.UDPServer.__init__(self, server_address, handler_class)
 
     def server_activate(self):
@@ -232,6 +235,7 @@ if __name__ == '__main__':
     response_q = Queue.Queue()
     err_q = Queue.Queue()
     address = (config.HOSTNAME, config.PEER_PORT)
+    SocketServer.UDPServer.allow_reuse_address = 1
     server = KademliaProtocolServer(request_q,
                                     response_q,
                                     err_q,

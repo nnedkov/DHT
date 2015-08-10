@@ -160,6 +160,7 @@ if __name__ == '__main__':
     response_q = Queue.Queue()
     err_q = Queue.Queue()
     address = (config.HOSTNAME, config.PORT)
+    SocketServer.TCPServer.allow_reuse_address = 1
     server = DHTAPIServer(request_q,
                           response_q,
                           err_q,
