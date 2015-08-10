@@ -62,15 +62,25 @@ class DHTAPIServer(SocketServer.TCPServer):
         SocketServer.TCPServer.server_activate(self)
 
     def serve_forever(self):
+        try:
+            self.serve_til_shutdown()
+        except Exception as e:
+            self.logger.debug('Exception occured: %s' % str(e))
+            exception = (e, self.thread_name)
+            self.err_q.put(exception)
+
+        self.socket.close()
+
+    def serve_til_shutdown(self):
         self.logger.debug('waiting for requests')
 
         # Timeout duration, measured in seconds. If handle_request() receives
         # no incoming requests within the timeout period, handle_request() will
         # return. It essentially makes handle_request() non-blocking.
-        self.timeout = 1
+        self.timeout = config.SHUT_DOWN_PERIOD
 
         # Test DHT-server request issuing to kademlia. Send 10 requests
-        self.test_req_issuing_to_kademlia(10)
+        # self.test_req_issuing_to_kademlia(10)
 
         # As long as we haven't received an EXIT signal, read the response
         # queue for incoming responses from kademlia (lower level). In
@@ -98,7 +108,6 @@ class DHTAPIServer(SocketServer.TCPServer):
                 self.err_q.put(exception)
 
         self.logger.info('shutting down...')
-        # self.socket.close()
 
     def process_kademlia_response(self, response):
         self.logger.debug('process_dht_request')

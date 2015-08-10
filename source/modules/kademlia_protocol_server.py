@@ -138,12 +138,22 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         SocketServer.UDPServer.server_activate(self)
 
     def serve_forever(self):
+        try:
+            self.serve_til_shutdown()
+        except Exception as e:
+            self.logger.debug('Exception occured: %s' % str(e))
+            exception = (e, self.thread_name)
+            self.err_q.put(exception)
+
+        self.socket.close()
+
+    def serve_til_shutdown(self):
         self.logger.debug('waiting for requests')
 
         # Timeout duration, measured in seconds. If handle_request() receives
         # no incoming requests within the timeout period, handle_request() will
         # return. It essentially makes handle_request() non-blocking.
-        self.timeout = 1
+        self.timeout = config.SHUT_DOWN_PERIOD
 
         # As long as we haven't received an EXIT signal, read the request queue
         # for requests from dht (from the higher level). In addition, serve any
@@ -164,7 +174,6 @@ class KademliaProtocolServer(SocketServer.UDPServer):
                 exception = (e, self.thread_name)
                 err_q.put(exception)
 
-
             try:
                 self.handle_request()
             except Exception as e:
@@ -172,7 +181,6 @@ class KademliaProtocolServer(SocketServer.UDPServer):
                 self.err_q.put(exception)
 
         self.logger.info('shutting down...')
-        # self.socket.close()
 
     def process_dht_request(self, request):
         self.logger.debug('process_dht_request')

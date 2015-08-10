@@ -52,6 +52,14 @@ def check_args():
                 exit_gracefully(message)
 
 
+def wait_threads_exit(threads):
+
+    logger.info('waiting threads to exit')
+
+    for t in threads:
+        t.join()
+
+
 def init_servers():
 
     # A container for all thread instances
@@ -98,18 +106,17 @@ def init_servers():
     while not config.SHUT_DOWN:
         try:
             error, thread_name = err_q.get(block=True, timeout=0.05)
-            # queue.task_done()
-            raise error
+            # An error/exception occured in a child thread. Update global
+            # variable to induce all children threads to exit and raise it
+            config.SHUT_DOWN = 1
+            wait_threads_exit(threads)
+            raise error, 'Exception in thread: %s' % thread_name
         except Empty:
             continue
-    logger.info('Some signal for exit was received. Waiting threads to exit')
+    logger.info('some signal for exit was received')
+    # shutting down has already been initiated by the signal handler
 
-    for t in threads:
-        t.join()
-
-    kademlia_server.socket.close()
-    dht_server.socket.close()
-
+    wait_threads_exit(threads)
     exit_gracefully('successful shut down')
 
 
