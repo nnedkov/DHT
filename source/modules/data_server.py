@@ -31,7 +31,6 @@ class DataServer:
         except:
             return -2
 
-
     def remove(self, key, data=None):
         if key in self.storage:
             if data is None:

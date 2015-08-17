@@ -7,9 +7,8 @@ import kademlia_protocol_server
 
 import config
 
-
 logging.basicConfig(level=config.LOG_LEVEL,
-                    format='%(name)s: %(message)s',)
+                    format='%(name)s: %(message)s', )
 
 
 class Buckets:
@@ -19,32 +18,34 @@ class Buckets:
 
         self.ksize = ksize  # k in kademlia
         self.id = int(id, 16)
-        self.length = length # key space size
+        self.length = length  # key space size
         self.buckets = dict()
 
-    # node = {'port': , 'ip': }
-    def add_refresh_node(self, node, id):
-        id = int(id,16)
-        distance = id ^ self.id
+    # node = {'id': , 'port': , 'ip': }
+    def add_refresh_node(self, node):
+        id = int(node['id'], 16)
+        id_str = node['id']
+        distance = id ^ self.id  # distance from peer
         index = distance.bit_length() - 1
         if index in self.buckets:
-            if id in self.buckets[index]:
-                del self.buckets[index][id]
-                self.buckets[index][id] = node
+            if id_str in self.buckets[index]:
+                del self.buckets[index][id_str]
+                self.buckets[index][id_str] = node
             elif len(self.buckets[index]) >= self.ksize:
-                oldest_unused = self.buckets.items()[0]
-                #TODO: Ping oldest_unused and check reply
-                kademlia_protocol_server.KademliaProtocolRequestHandler.ping()
+                oldest_unused = self.buckets[index].items()[0]
+                kademlia_protocol_server.KademliaProtocolServer.ping(oldest_unused[1]['id'],
+                                                                             oldest_unused[1]['ip'],
+                                                                             oldest_unused[1]['port'])
                 return False
             else:
-                self.buckets[index][id] = node
+                self.buckets[index][id_str] = node
         else:
             self.buckets[index] = OrderedDict()
-            self.buckets[index][id] = node
+            self.buckets[index][id_str] = node
         return True
 
     def del_node(self, id):
-        id = int(id,16)
+        id = int(id, 16)
         distance = id ^ self.id
         index = distance.bit_length() - 1
         if index in self.buckets:
@@ -85,7 +86,7 @@ class Buckets:
             elif i > 0:
                 i *= -1
             else:
-                i = abs(i-1)
+                i = abs(i - 1)
         return neighbors
 
     def get_nodes(self):
@@ -94,12 +95,15 @@ class Buckets:
 
 if __name__ == '__main__':
     import random
+
     size = 160
     id = str(hex(random.getrandbits(size)))[2:-1]
     buckets = Buckets(id, size, 20)
     times = []
-    id = str(hex(random.getrandbits(size)))[2:-1]
-    buckets.add_refresh_node(node={'ip':'10.2.1.2', 'port':'12'},id=id)
-    print buckets.get_nodes()
-    buckets.del_node(id)
-    print buckets.get_nodes()
+    id = "00000000000000000000000000000000000000"
+    buckets.add_refresh_node(node={'id': id + "01", 'ip': '10.2.1.2', 'port': '1'})
+    # print buckets.get_nodes()
+    # buckets.del_node(id)
+    # print buckets.get_nodes()
+    node = {'id':'d','ip': 'w', 'port': 'q'}
+    print node
