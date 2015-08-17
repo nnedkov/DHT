@@ -77,6 +77,7 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
         res = RPC_handler()
 
         socket.sendto(dumps(res), self.client_address)
+        socket.close()
 
     def req_is_valid(self):
         try:

@@ -3,6 +3,10 @@
 import logging
 import SocketServer
 import Queue
+from struct import pack, unpack, calcsize
+from bitstring import BitArray
+import sys
+
 
 import config
 
@@ -19,6 +23,11 @@ class DHTAPIRequestHandler(SocketServer.BaseRequestHandler):
         self.request_q = request_q
         self.response_q = response_q
         self.err_q = err_q
+        # key -> RPC identifier, value -> RPC handler
+        self.RPCs = { config.MSG_DHT_PUT: self.put_reply,
+                      config.MSG_DHT_GET: self.get_reply,
+                      config.MSG_DHT_TRACE: self.trace_reply,
+                      config.MSG_DHT_ERROR: self.error }
         SocketServer.BaseRequestHandler.__init__(self,
                                                  request,
                                                  client_address,
@@ -31,10 +40,121 @@ class DHTAPIRequestHandler(SocketServer.BaseRequestHandler):
     def handle(self):
         self.logger.debug('handle')
 
-        # Echo the back to the client
-        data = self.request.recv(1024)
-        self.logger.debug("recv()->'%s'", data)
-        self.request.send(data.upper())
+        try:
+            msg_header = self.request.recv(4)
+
+            amount_received = len(msg_header)
+            unpacked_header = unpack('hh', msg_header)
+
+            amount_expected = socket.ntohs(unpacked_header[0])
+            self.req_type = socket.ntohs(unpacked_header[1])
+
+            self.msg_body = ''
+            while amount_received < amount_expected:
+                self.msg_body += self.request.recv(16384)
+                amount_received = len(msg_header) + len(self.msg_body)
+
+        except:
+            print 'Unexpected error:', sys.exc_info()[0]
+            self.response = self.error()
+            self.request.send(self.response, self.client_address)
+            return
+
+        RPC_handler = self.RPCs[self.req_type]
+        RPC_handler()
+
+        if self.response is not None:
+            self.request.send(self.response)
+
+        self.request.close()
+
+    def put_reply(self):
+        self.logger.debug('put_reply')
+
+        pack_str = '256shh32s%ss' % (len(self.msg_body) - calcsize('256shh32s'))
+        self.logger.debug('expected body size: %s' % calcsize(pack_str))
+        self.logger.debug('received body size: %s' % len(self.msg_body))
+
+        try:
+            unpacked_body = unpack(pack_str, self.msg_body)
+
+            self.key = unpacked_body[0]
+            self.ttl = socket.ntohs(unpacked_body[1])
+            self.replication = socket.ntohs(unpacked_body[2])
+            self.reserved = unpacked_body[3]
+            self.content = unpacked_body[4]
+        except:
+            self.response = self.error()
+
+        self.logger.debug('key: %s' % self.key)
+        self.logger.debug('ttl: %s' % self.ttl)
+        self.logger.debug('replication: %s' % self.replication)
+        self.logger.debug('reserved: %s' % self.reserved)
+        self.logger.debug('content: %s' % self.content)
+
+        # TODO: functionality for processing the request
+
+        self.response = None
+
+    def get_reply(self):
+        self.logger.debug('get_reply')
+
+        pack_str = '256s'
+        self.logger.debug('expected body size: %s' % calcsize(pack_str))
+        self.logger.debug('received body size: %s' % len(self.msg_body))
+
+        try:
+            unpacked_body = unpack(pack_str, self.msg_body)
+
+            self.key = unpacked_body[0]
+        except:
+            self.response = self.error()
+            return
+
+        self.logger.debug('key: %s' % self.key)
+
+        # TODO: functionality for processing the request
+
+        content = BitArray(int=randrange(0, 1000), length=256)
+        pack_str = 'hh256s%ss' % len(content)
+        self.response = pack(pack_str,
+                             socket.htons(calcsize(pack_str)),
+                             socket.htons(config.MSG_DHT_GET_REPLY),
+                             str(self.key),
+                             str(content))
+
+        self.logger.debug('content: %s' % str(content))
+        self.logger.debug('total response size: %s' % calcsize(pack_str))
+
+    def trace_reply(self):
+        self.logger.debug('trace_reply')
+
+        try:
+            pack_str = '256s'
+            unpacked_body = unpack(pack_str, self.msg_body)
+
+            self.key = unpacked_body[0]
+        except:
+            self.response = self.error()
+            return
+
+        self.logger.debug('key: %s' % self.key)
+
+        # TODO: functionality for processing the request
+
+        self.response = None
+
+    def error(self):
+        self.logger.debug('error')
+
+        pack_str = 'hhh16s256s'
+        error_res = pack(pack_str,
+                         socket.htons(calcsize('hhh16s256s')),
+                         config.MSG_DHT_ERROR,
+                         socket.htons(self.req_type),
+                         BitArray(int=0, length=16),
+                         self.key)
+        return error_res
 
     def finish(self):
         self.logger.debug('finish')
@@ -155,6 +275,8 @@ if __name__ == '__main__':
     from threading import Thread
     import socket
     from time import sleep
+    from random import randrange
+
 
     request_q = Queue.Queue()
     response_q = Queue.Queue()
@@ -173,7 +295,7 @@ if __name__ == '__main__':
 
     # Test DHT-server request handling from KX
     logger = logging.getLogger('Client')
-    logger.info('Server on %s:%s', address[0], address[1])
+    logger.info('server on %s:%s', address[0], address[1])
 
     # Connect to the server
     logger.debug('creating socket')
@@ -181,15 +303,81 @@ if __name__ == '__main__':
     logger.debug('connecting to server')
     s.connect(address)
 
+    # Create request data
+
+    # DHT PUT
+    key = BitArray(int=randrange(0, 100), length=256)
+    ttl = 12
+    replication = 4
+    reserved = BitArray(int=0, length=32)
+    content = BitArray(int=randrange(0, 1000), length=256)
+    pack_str = 'hh256shh32s%ss' % len(content)
+    size = calcsize(pack_str)
+
+    dht_put = pack(pack_str,
+                   socket.htons(size),
+                   socket.htons(config.MSG_DHT_PUT),
+                   str(key),
+                   socket.htons(ttl),
+                   socket.htons(replication),
+                   str(reserved),
+                   str(content))
+
+    logger.debug('key: %s' % str(key))
+    logger.debug('ttl: %s' % ttl)
+    logger.debug('replication: %s' % replication)
+    logger.debug('reserved: %s' % str(reserved))
+    logger.debug('content: %s' % str(content))
+    logger.debug('total DHT PUT request size: %s' % size)
+
     # Send the data
-    message = 'Hello, world'
-    logger.debug('sending data: "%s"', message)
-    len_sent = s.send(message)
+    logger.debug('sending the DHT PUT request')
+    len_sent = s.send(dht_put)
+
+    # DHT GET
+    key = BitArray(int=randrange(0, 100), length=256)
+    pack_str = 'hh256s'
+    size = calcsize(pack_str)
+
+    dht_get = pack(pack_str,
+                   socket.htons(size),
+                   socket.htons(config.MSG_DHT_GET),
+                   str(key))
+
+    logger.debug('key: %s' % str(key))
+    logger.debug('total DHT GET request size: %s' % size)
+
+    # Send the data
+    logger.debug('sending the DHT GET request')
+    len_sent = s.send(dht_get)
 
     # Receive a response
     logger.debug('waiting for response')
-    response = s.recv(len_sent)
-    logger.debug('response from server: "%s"', response)
+    response = s.recv(16384)
+    print len(response)
+
+    unpacked_response = unpack('hh256s256s', response)
+    logger.debug('total response size: %s' % socket.ntohl(unpacked_response[0]))
+    logger.debug('response type: %s' % socket.ntohl(unpacked_response[1]))
+    logger.debug('key: %s' % unpacked_response[2])
+    logger.debug('content: %s' % unpacked_response[3])
+
+    # DHT TRACE
+    key = BitArray(int=randrange(0, 100), length=256)
+    pack_str = 'hh256s'
+    size = calcsize(pack_str)
+
+    dht_trace = pack(pack_str,
+                     socket.htons(size),
+                     socket.htons(config.MSG_DHT_TRACE),
+                     str(key))
+
+    logger.debug('key: %s' % str(key))
+    logger.debug('total DHT TRACE request size: %s' % size)
+
+    # Send the data
+    logger.debug('sending the DHT TRACE request')
+    len_sent = s.send(dht_trace)
 
     # Clean up
     logger.debug('closing socket')

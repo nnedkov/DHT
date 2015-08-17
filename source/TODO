@@ -6,7 +6,6 @@ High priority:
 
 	NEDKO:
 		* when receiving store-reply, pong, etc push it to the DHT layer
-		* write functionality for DHTAPIServer (KX request parsing - responding)
 		* seperate modules/refactoring
 
 
