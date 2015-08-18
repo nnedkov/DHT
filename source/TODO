@@ -5,7 +5,9 @@ High priority:
 		* add functionality in maintain_til_shutdown function (maintenance of buckets)
 
 	NEDKO:
-		* when receiving store-reply, pong, etc push it to the DHT layer
+		* servers don't bind the correct port
+		* reserved bits
+		* TUM Informatics: ask for testing code
 		* seperate modules/refactoring
 
 

@@ -8,6 +8,8 @@ from threading import Thread
 import buckets, verify
 import random
 from data_server import DataServer
+from time import sleep
+
 
 import config
 
@@ -41,9 +43,6 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
     def __init__(self, request, client_address, server):
         self.logger = logging.getLogger('KademliaProtocolRequestHandler')
         self.logger.debug('__init__')
-        self.request_q = request_q
-        self.response_q = response_q
-        self.err_q = err_q
         # key -> RPC identifier, value -> [RPC handler, [keys the bson obj should have]]
         self.RPCs = { 'PING': [self.pong, ['MID', 'SID', 'RID']],
                       'STORE': [self.store_reply, ['MID', 'SID', 'RID', 'Key', 'TTL', 'Value']],
@@ -212,6 +211,7 @@ class KademliaProtocolServer(SocketServer.UDPServer):
 
             try:
                 request = self.request_q.get(True, 0.05)
+                self.request_q.task_done()
                 response = self.process_dht_request(request)
                 self.response_q.put(response)
             except Queue.Empty:
@@ -229,12 +229,38 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         self.logger.info('shutting down...')
 
     def process_dht_request(self, request):
+        def store(request):
+            response = { 'all_ok': True }
+            return response
+
+        def find_value(request):
+            from random import randrange
+            from bitstring import BitArray
+            content = BitArray(int=randrange(0, 1000), length=256)
+            self.logger.debug('process_dht_request->find_value.str(content): %s' % str(content))
+            self.logger.debug('process_dht_request->find_value.len(str(content)): %s' % len(str(content)))
+            response = { 'content': str(content),
+                         'all_ok': True }
+            self.logger.debug('process_dht_request->find_value.len(response["content"]): %s' % len(response['content']))
+
+            return response
+
         self.logger.debug('process_dht_request')
         self.logger.debug('received dht request: %s' % str(request))
-        # TODO: add functionality for request processing
-        status = True
-        message = 'Response from kademlia_protocol_server (for request: %s)' % request
-        response = (status, message)
+
+        # TODO: uncomment below code when testing is done
+#        request_handlers = { config.MSG_DHT_PUT: KademliaProtocolRequestHandler.store,
+#                             config.MSG_DHT_GET: KademliaProtocolRequestHandler.find_value,
+#                             config.MSG_DHT_TRACE: KademliaProtocolRequestHandler.?}
+        request_handlers = { config.MSG_DHT_PUT: store,
+                             config.MSG_DHT_GET: find_value}
+
+        request_handler = request_handlers[request['type']]
+        del request['type']
+        response = request_handler(request)
+
+        self.logger.debug('response (for dht request: %s): %s' % (request, response))
+        self.logger.debug('process_dht_request is done')
 
         return response
 

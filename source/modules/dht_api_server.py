@@ -6,6 +6,8 @@ import Queue
 from struct import pack, unpack, calcsize
 from bitstring import BitArray
 import sys
+from random import randrange
+import socket
 
 
 import config
@@ -20,9 +22,6 @@ class DHTAPIRequestHandler(SocketServer.BaseRequestHandler):
     def __init__(self, request, client_address, server):
         self.logger = logging.getLogger('DHTAPIRequestHandler')
         self.logger.debug('__init__')
-        self.request_q = request_q
-        self.response_q = response_q
-        self.err_q = err_q
         # key -> RPC identifier, value -> RPC handler
         self.RPCs = { config.MSG_DHT_PUT: self.put_reply,
                       config.MSG_DHT_GET: self.get_reply,
@@ -57,7 +56,7 @@ class DHTAPIRequestHandler(SocketServer.BaseRequestHandler):
         except:
             print 'Unexpected error:', sys.exc_info()[0]
             self.response = self.error()
-            self.request.send(self.response, self.client_address)
+            self.request.send(self.response)
             return
 
         RPC_handler = self.RPCs[self.req_type]
@@ -92,7 +91,16 @@ class DHTAPIRequestHandler(SocketServer.BaseRequestHandler):
         self.logger.debug('reserved: %s' % self.reserved)
         self.logger.debug('content: %s' % self.content)
 
-        # TODO: functionality for processing the request
+        req = { 'type': config.MSG_DHT_PUT,
+                'key': self.key,
+                'ttl': self.ttl,
+                'replication': self.replication }
+
+        res = self.make_kademlia_request(req)
+
+        if res is None or not res['all_ok']:
+            self.response = self.error()
+            return
 
         self.response = None
 
@@ -111,11 +119,18 @@ class DHTAPIRequestHandler(SocketServer.BaseRequestHandler):
             self.response = self.error()
             return
 
-        self.logger.debug('key: %s' % self.key)
+        req = { 'type': config.MSG_DHT_GET,
+                'key': self.key }
 
-        # TODO: functionality for processing the request
+        res = self.make_kademlia_request(req)
 
-        content = BitArray(int=randrange(0, 1000), length=256)
+        if res is None or not res['all_ok']:
+            self.response = self.error()
+            return
+
+        content = res['content']
+        self.logger.debug('get_reply.len(str(content)): %s' % len(str(content)))
+
         pack_str = 'hh256s%ss' % len(content)
         self.response = pack(pack_str,
                              socket.htons(calcsize(pack_str)),
@@ -123,6 +138,10 @@ class DHTAPIRequestHandler(SocketServer.BaseRequestHandler):
                              str(self.key),
                              str(content))
 
+        self.logger.debug('pack_str: %s' % pack_str)
+        self.logger.debug('total response size: %s' % calcsize(pack_str))
+        self.logger.debug('response type: %s' % config.MSG_DHT_GET_REPLY)
+        self.logger.debug('key: %s' % self.key)
         self.logger.debug('content: %s' % str(content))
         self.logger.debug('total response size: %s' % calcsize(pack_str))
 
@@ -147,14 +166,42 @@ class DHTAPIRequestHandler(SocketServer.BaseRequestHandler):
     def error(self):
         self.logger.debug('error')
 
+        if not hasattr(self, 'req_type'):
+            self.req_type = 0
+            self.key = BitArray(int=0, length=256)
+
         pack_str = 'hhh16s256s'
         error_res = pack(pack_str,
                          socket.htons(calcsize('hhh16s256s')),
-                         config.MSG_DHT_ERROR,
+                         socket.htons(config.MSG_DHT_ERROR),
                          socket.htons(self.req_type),
-                         BitArray(int=0, length=16),
-                         self.key)
+                         str(BitArray(int=0, length=16)),
+                         str(self.key))
         return error_res
+
+    def make_kademlia_request(self, req):
+        res = None
+
+        self.logger.debug('placing request in queue')
+
+        self.server.request_q.put(req)
+
+        self.logger.debug('placed request in queue')
+
+        try:
+            res = self.server.response_q.get(True, 10)
+            self.server.response_q.task_done()
+            self.logger.debug('make_kademlia_request received response: %s' % str(res))
+        except Queue.Empty:
+            self.logger.debug('make_kademlia_request Queue.Empty')
+        except Exception as e:
+            exception = (e, self.thread_name)
+            self.sever.err_q.put(exception)
+            self.logger.debug('make_kademlia_request Exception')
+
+        self.logger.debug('make_kademlia_request done')
+
+        return res
 
     def finish(self):
         self.logger.debug('finish')
@@ -213,15 +260,6 @@ class DHTAPIServer(SocketServer.TCPServer):
         while not config.SHUT_DOWN:
 
             try:
-                response = self.response_q.get(True, 0.05)
-                self.process_kademlia_response(response)
-            except Queue.Empty:
-                pass
-            except Exception as e:
-                exception = (e, self.thread_name)
-                self.err_q.put(exception)
-
-            try:
                 self.handle_request()
             except Exception as e:
                 exception = (e, self.thread_name)
@@ -270,31 +308,18 @@ class DHTAPIServer(SocketServer.TCPServer):
         return SocketServer.TCPServer.close_request(self, request_address)
 
 
-if __name__ == '__main__':
-
-    from threading import Thread
-    import socket
-    from time import sleep
-    from random import randrange
 
 
-    request_q = Queue.Queue()
-    response_q = Queue.Queue()
-    err_q = Queue.Queue()
-    address = (config.HOSTNAME, config.PORT)
-    SocketServer.TCPServer.allow_reuse_address = 1
-    server = DHTAPIServer(request_q,
-                          response_q,
-                          err_q,
-                          address,
-                          DHTAPIRequestHandler)
 
-    t = Thread(target=server.serve_forever)
-    #t.setDaemon(True)   # terminate when the main thread ends
-    t.start()
+def issue_dht_put(logger, port):
+    def clean_up():
+        # Clean up
+        logger.debug('closing socket')
+        s.close()
+        logger.debug('done')
 
     # Test DHT-server request handling from KX
-    logger = logging.getLogger('Client')
+    address = (config.HOSTNAME, port)
     logger.info('server on %s:%s', address[0], address[1])
 
     # Connect to the server
@@ -302,8 +327,6 @@ if __name__ == '__main__':
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     logger.debug('connecting to server')
     s.connect(address)
-
-    # Create request data
 
     # DHT PUT
     key = BitArray(int=randrange(0, 100), length=256)
@@ -334,7 +357,43 @@ if __name__ == '__main__':
     logger.debug('sending the DHT PUT request')
     len_sent = s.send(dht_put)
 
-    # DHT GET
+    # Receive a response
+    logger.debug('waiting for response')
+    res_header = s.recv(4)
+
+    logger.debug('response lenght: %s' % len(res_header))
+
+    if len(res_header) == 0:
+        clean_up()
+    else:
+        amount_received = len(res_header)
+        unpacked_header = unpack('hh', res_header)
+
+        res_size = socket.ntohs(unpacked_header[0])
+        res_type = socket.ntohs(unpacked_header[1])
+        logger.debug('response size: %s' % res_size)
+        logger.debug('response type: %s' % res_type)
+        clean_up()
+
+
+def issue_dht_get(logger, port):
+    def clean_up():
+        # Clean up
+        logger.debug('closing socket')
+        s.close()
+        logger.debug('done')
+
+    # Test DHT-server request handling from KX
+    address = (config.HOSTNAME, port)
+    logger.info('server on %s:%s', address[0], address[1])
+
+    # Connect to the server
+    logger.debug('creating socket')
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    logger.debug('connecting to server')
+    s.connect(address)
+
+    # DHT PUT
     key = BitArray(int=randrange(0, 100), length=256)
     pack_str = 'hh256s'
     size = calcsize(pack_str)
@@ -353,36 +412,41 @@ if __name__ == '__main__':
 
     # Receive a response
     logger.debug('waiting for response')
-    response = s.recv(16384)
-    print len(response)
+    res_header = s.recv(4)
 
-    unpacked_response = unpack('hh256s256s', response)
-    logger.debug('total response size: %s' % socket.ntohl(unpacked_response[0]))
-    logger.debug('response type: %s' % socket.ntohl(unpacked_response[1]))
-    logger.debug('key: %s' % unpacked_response[2])
-    logger.debug('content: %s' % unpacked_response[3])
+    logger.debug('response lenght: %s' % len(res_header))
 
-    # DHT TRACE
-    key = BitArray(int=randrange(0, 100), length=256)
-    pack_str = 'hh256s'
-    size = calcsize(pack_str)
+    if len(res_header) == 0:
+        clean_up()
+    else:
+        amount_received = len(res_header)
+        unpacked_header = unpack('hh', res_header)
 
-    dht_trace = pack(pack_str,
-                     socket.htons(size),
-                     socket.htons(config.MSG_DHT_TRACE),
-                     str(key))
+        res_size = socket.ntohs(unpacked_header[0])
+        res_type = socket.ntohs(unpacked_header[1])
+        logger.debug('response size: %s' % res_size)
+        logger.debug('response type: %s' % res_type)
+        if res_type == config.MSG_DHT_ERROR:
+            clean_up()
 
-    logger.debug('key: %s' % str(key))
-    logger.debug('total DHT TRACE request size: %s' % size)
+        amount_expected = res_size
+        res_body = ''
+        while amount_received < amount_expected:
+            res_body += s.recv(16384)
+            amount_received = len(res_header) + len(res_body)
 
-    # Send the data
-    logger.debug('sending the DHT TRACE request')
-    len_sent = s.send(dht_trace)
+        pack_str = '256s%ss' % (len(res_body)-calcsize('256s'))
+        unpacked_response = unpack(pack_str, res_body)
+        logger.debug('pack_str: %s' % pack_str)
+        logger.debug('key: %s' % unpacked_response[0])
+        logger.debug('content: %s' % unpacked_response[1])
 
-    # Clean up
-    logger.debug('closing socket')
-    s.close()
-    config.SHUT_DOWN = 1
-    sleep(3)
-    logger.debug('done')
-    server.socket.close()
+
+if __name__ == '__main__':
+    port = 42054
+    logger = logging.getLogger('DHT Client')
+    logger.debug('issuing DHT PUT')
+    issue_dht_put(logger, port)
+    print
+    logger.debug('issuing DHT GET')
+    issue_dht_get(logger, port)
