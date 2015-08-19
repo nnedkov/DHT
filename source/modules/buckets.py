@@ -21,7 +21,7 @@ class Buckets:
         self.length = length  # key space size
         self.buckets = dict()
 
-    # node = {'id': , 'port': , 'ip': }
+    # node = {'id': string, 'port': number, 'ip': number}
     def add_refresh_node(self, node):
         id = int(node['id'], 16)
         id_str = node['id']
@@ -44,6 +44,7 @@ class Buckets:
             self.buckets[index][id_str] = node
         return True
 
+    # id is a string
     def del_node(self, id):
         id = int(id, 16)
         distance = id ^ self.id
@@ -56,17 +57,18 @@ class Buckets:
                 return True
         return False
 
-    # return k closest peers to the id
+    # id is a string
+    # return k closest peers to the id as a list
     def get_closest_nodes(self, id, k):
         id = int(id, 16)
         distance = id ^ self.id
-        index = distance.bit_length() - 1
+        indices = Buckets.get_indices(distance)
         neighbors = []
         i = 0
         total = 0
-        while total < k and abs(i) < self.length:
+        while total < k and i < self.length:
             remaining = k - total
-            current_index = index + i
+            current_index = indices[i]
             if current_index in self.buckets:
                 length = len(self.buckets[current_index])
                 # there is enough nodes or less in the bucket
@@ -80,30 +82,34 @@ class Buckets:
                 # append nodes to neighbors list
                 x = dict(itertools.islice(self.buckets[current_index].items(), 0, items))
                 neighbors.append(x)
-            # i = 0, -1, 1, -2, 2, -3, 3, -4, 4,....
-            if i == 0:
-                i = 1
-            elif i > 0:
-                i *= -1
-            else:
-                i = abs(i - 1)
+            i += 1
         return neighbors
 
     def get_nodes(self):
         return self.buckets
 
+    @staticmethod
+    def get_indices(distance):
+        indices = []
+        temp_dist = distance
+        while temp_dist != 0:
+            indices.append(temp_dist.bit_length() - 1)
+            temp_dist = 2**indices[-1]-1 & distance
+        i = 0
+        while i < 256:
+            if i not in indices:
+                indices.append(i)
+            i += 1
+        return indices
 
 if __name__ == '__main__':
     import random
+    import operator
 
-    size = 160
+    size = 256
     id = str(hex(random.getrandbits(size)))[2:-1]
     buckets = Buckets(id, size, 20)
-    times = []
-    id = "00000000000000000000000000000000000000"
-    buckets.add_refresh_node(node={'id': id + "01", 'ip': '10.2.1.2', 'port': '1'})
-    # print buckets.get_nodes()
-    # buckets.del_node(id)
-    # print buckets.get_nodes()
-    node = {'id':'d','ip': 'w', 'port': 'q'}
-    print node
+    print str(buckets.id)
+    #for i in range(100000):
+    #    id = str(hex(random.getrandbits(size)))[2:-1]
+    #    buckets.add_refresh_node(node={'id': id, 'ip': '10.2.1.2', 'port': '1'})

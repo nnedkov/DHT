@@ -94,18 +94,20 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
             # TODO: verify value types
             if not self.req.has_key(key):
                 return False, 'request with required keys missing'
-        # TODO: verify SID/RID combination
+        if self.req['RID'] != str(self.buckets.id):
+            return False, 'invalid RID'
+        # TODO: think if we need to check SID/IP combination by looking into buckets
         return True, ''
 
     def pong(self):
         res = self.prepare_reply('PONG')
-        node = {'id':self.req['SID'],'ip': self.client_address[0], 'port': self.client_address[1]}
+        node = {'id':  self.req['SID'], 'ip': self.client_address[0], 'port': self.client_address[1]}
         self.buckets.add_refresh_node(node)
         return res
 
     def store_reply(self):
         res = self.prepare_reply('STORE_REPLY')
-        node = {'id':self.req['SID'],'ip': self.client_address[0], 'port': self.client_address[1]}
+        node = {'id':self.req['SID'], 'ip': self.client_address[0], 'port': self.client_address[1]}
         self.buckets.add_refresh_node(node)
         if self.req['TTL'] > 43200:  # Max duration
             res['Status'] = -1
@@ -115,28 +117,27 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
             return res
 
     def find_node_reply(self):
-        # TODO: change 20 to a global constant K
         res = self.prepare_reply('FIND_STORE_REPLY')
-        node = {'id':self.req['SID'],'ip': self.client_address[0], 'port': self.client_address[1]}
+        node = {'id': self.req['SID'], 'ip': self.client_address[0], 'port': self.client_address[1]}
         self.buckets.add_refresh_node(node)
-        nodes = self.buckets.get_closest_nodes(self.req['Key'], 20)
+        nodes = self.buckets.get_closest_nodes(self.req['Key'], self.buckets.ksize)
         res['Nodes'] = nodes
         return res
 
     def find_value_reply(self):
         res = self.prepare_reply('FIND_VALUE_REPLY')
-        node = {'id':self.req['SID'],'ip': self.client_address[0], 'port': self.client_address[1]}
+        node = {'id': self.req['SID'], 'ip': self.client_address[0], 'port': self.client_address[1]}
         self.buckets.add_refresh_node(node)
         value = self.data_server.get(self.req['Key'])
         if value is None:
-            nodes = self.buckets.get_closest_nodes(self.req['Key'], 20)
+            nodes = self.buckets.get_closest_nodes(self.req['Key'], self.buckets.ksize)
             res['Nodes'] = nodes
         res['Values'] = value
         return res
 
     def verify_reply(self):
         res = self.prepare_reply('VERIFY_REPLY')
-        node = {'id':self.req['SID'],'ip': self.client_address[0], 'port': self.client_address[1]}
+        node = {'id': self.req['SID'], 'ip': self.client_address[0], 'port': self.client_address[1]}
         self.buckets.add_refresh_node(node)
         res['Challenge_Reply'] = verify.work(self.req['Challenge'])
         return res
@@ -169,6 +170,7 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         self.request_q = request_q
         self.response_q = response_q
         self.err_q = err_q
+        # TODO: change 20 to a global constant K
         self.buckets = buckets.Buckets(KademliaProtocolServer.peer_id, 160, 20)
         self.data_server = DataServer()
 
@@ -230,8 +232,22 @@ class KademliaProtocolServer(SocketServer.UDPServer):
 
     def process_dht_request(self, request):
         def store(request):
-            response = { 'all_ok': True }
-            return response
+
+            key = request['key']
+            value = request['value']
+            ttl = request['ttl']
+            replication = request['replication']
+            i = 0
+            target_nodes = self.node_lookup(id, 3)
+            for node in target_nodes:
+                if store(node['id'], node['ip'], node['port'], key, value, ttl):
+                    i += 1
+                    if i == replication:
+                        break
+            if i < replication:
+                return {'all_ok': False}
+
+            return {'all_ok': True}
 
         def find_value(request):
             from random import randrange
@@ -294,8 +310,69 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         self.logger.debug('close_request(%s)', request_address)
         return SocketServer.UDPServer.close_request(self, request_address)
 
+    def node_lookup(self, id, alpha):
+        # get local neighbors in your own kbuckets
+        local_peers = self.buckets.get_closest_nodes(id, alpha)
+        # Super list of all nodes indexed by the distance of a node to the target id
+        nodes = dict()
+        for peer in local_peers:
+            # peer: (id, ip, port)
+            # tuple: (peer, contacted, replied)
+            nodes[int(peer['id'], 16) ^ id] = (peer, False, False)
 
-    #TODO: add a static method for sending through sockets
+        round_nodes = []
+        # begin rounds:
+        for node in nodes:
+            # if node has not been contacted it yet!
+            if not node[1]:
+                # node = tuple: (peer, contacted, replied)
+                node[1] = True
+                round_nodes.append(node)
+                # issue find_node() requests to all round_nodes
+                # for each peer that replies do:
+                    # round_nodes[!][2] = True
+                # for each reply add nodes to dict:
+                # if reply['id'] not in nodes:      << based on real ID
+                    # nodes[int(reply['id'], 16) ^ id] = (reply, False, False) << indexed based on distance
+
+        # BEGIN ROUND
+        while 1:
+            # Empty current nods list
+            del round_nodes[:]
+            # Sort nodes to find closest peers
+            sorted_nodes = sorted(nodes.items(), key=operator.itemgetter(0))
+            # if new closer nodes were found, add them to the round_nods for querying
+            i = 0
+            while not sorted_nodes[i][1][1] and i < alpha:
+                round_nodes.append(sorted_nodes[i][1])
+                round_nodes[-1][1] = True
+                nodes[sorted_nodes[i][0]][1] = True
+                i += 1
+            # if there were new closer nodes, add old not yet queried close nodes to the round_nods for querying
+            if i == 0:
+                while i < self.buckets.ksize and i < len(sorted_nodes):
+                    if not sorted_nodes[i][1][1]:
+                        round_nodes.append(sorted_nodes[j][1])
+                        round_nodes[-1][1] = True
+                        nodes[sorted_nodes[i][0]][1] = True
+
+            # check if there are new nodes to query, if not, node_lookup is complete
+            if not round_nodes:
+                break
+            # issue find_node() requests to all round_nodes
+                    # for each peer that replies do:
+                        # round_nodes[!][2] = True
+                    # for each reply add nodes to dict:
+                    # if reply['id'] not in nodes:      << based on real ID
+                        # nodes[int(reply['id'], 16) ^ id] = (reply, False, False) << indexed based on distance
+
+        # END ROUND
+        result = []
+        sorted_nodes = sorted(nodes.items(), key=operator.itemgetter(0))
+        for i in range(self.buckets.ksize):
+            result.append(sorted_nodes[i])
+        return result
+    # TODO: add a static method for sending through sockets and getting the replies back
 
     @staticmethod
     def prepare_req(msg_type):
@@ -310,7 +387,7 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         req = KademliaProtocolServer.prepare_req('PING')
         req['RID'] = str(id)  # or ID in case ID is already a string
         #send_req(req, ip, port)
-        pass
+        return
 
     @staticmethod
     def store(id, ip, port, key, value, ttl):
@@ -329,7 +406,8 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         req['KX_INFO'] = KX_INFO
         req['Key'] = key
         #send_req(req, ip, port)
-        pass
+        #retrun the answer in find_node_reply from the other peer
+        return nodes
 
     @staticmethod
     def find_value(id, ip, port, key):
