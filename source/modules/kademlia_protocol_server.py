@@ -382,48 +382,108 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         #req['SID'] = str(self.buckets.id)
         return req
 
+
+
     @staticmethod
     def ping(id, ip, port):
         req = KademliaProtocolServer.prepare_req('PING')
-        req['RID'] = str(id)  # or ID in case ID is already a string
-        #send_req(req, ip, port)
-        return
+        
+        req['RID'] = str(id)
+
+        # Connect to the peer
+        address = (ip, port)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(address)
+
+        req_bson = dumps(req)
+        s.send(req_bson)
+
+        response = s.recv(16384)
+        s.close()
+
+        if len(response) == 0:
+            return False
+
+        is_valid, error_msg = KademliaProtocolServer.res_is_valid(response)
+        if not is_valid:
+            return False
+
+        return True
 
     @staticmethod
     def store(id, ip, port, key, value, ttl):
-        req = self.prepare_req('STORE')
+        req = KademliaProtocolServer.prepare_req('STORE')
         req['RID'] = id
         req['Key'] = key
         req['Value'] = value
         req['TTL'] = ttl
-        #send_req(req, ip, port)
-        pass
+
+        # Connect to the peer
+        address = (ip, port)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(address)
+
+        req_bson = dumps(req)
+        s.send(req_bson)
+
+        response = s.recv(16384)
+        s.close()
+
+        if len(response) == 0:
+            return False
+
+        is_valid, error_msg = KademliaProtocolServer.res_is_valid(response)
+        if not is_valid:
+            return False
+
+        return True
 
     @staticmethod
     def find_node(id, ip, port, KX_INFO, key):
-        req = prepare_req('FIND_NODE')
+        req = KademliaProtocolServer.prepare_req('FIND_NODE')
         req['RID'] = id
         req['KX_INFO'] = KX_INFO
         req['Key'] = key
         #send_req(req, ip, port)
         #retrun the answer in find_node_reply from the other peer
-        return nodes
+        #return nodes
 
     @staticmethod
     def find_value(id, ip, port, key):
-        req = prepare_req('FIND_VALUE')
+        req = KademliaProtocolServer.prepare_req('FIND_VALUE')
         req['RID'] = id
         req['Key'] = key
         #send_req(req, ip, port)
-        pass
 
     @staticmethod
     def verify(id, ip, port, x):
-        req = prepare_req('VERIFY')
+        req = KademliaProtocolServer.prepare_req('VERIFY')
         req['RID'] = id
         req['Challenge'] = x
         #send_req(req, ip, port)
-        pass
+
+    @staticmethod
+    def res_is_valid(res):
+        required_keys_map = { 'PONG': ['MID', 'SID', 'RID'],
+                              'STORE_REPLY': ['MID', 'SID', 'RID', 'Status'],
+                              'VERIFY_REPLY': ['MID', 'SID', 'RID', 'Challenge_Reply'] }
+        try:
+            res = loads(res)
+        except ValueError:
+            return False, 'non-valid bson object'
+
+        try:
+            res_type = res['TYPE']
+            required_keys = required_keys_map[res_type]
+        except KeyError:
+            return False, 'response with no specified type'
+
+        for key in required_keys:
+            # TODO: verify value types
+            if not res.has_key(key):
+                return False, 'response with required keys missing'
+        # TODO: verify SID/RID combination
+        return True, ''
 
 
 if __name__ == '__main__':
