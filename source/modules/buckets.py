@@ -33,9 +33,16 @@ class Buckets:
                 self.buckets[index][id_str] = node
             elif len(self.buckets[index]) >= self.ksize:
                 oldest_unused = self.buckets[index].items()[0]
-                kademlia_protocol_server.KademliaProtocolServer.ping(oldest_unused[1]['id'],
+                i = 0
+                # try to ping 5 times, if not successful in all of them, add the new node in place
+                while not kademlia_protocol_server.KademliaProtocolServer.ping(oldest_unused[1]['id'],
                                                                              oldest_unused[1]['ip'],
-                                                                             oldest_unused[1]['port'])
+                                                                             oldest_unused[1]['port']):
+                    i += 1
+                    if i == 4:
+                        del self.buckets[index][oldest_unused[1]['id']]
+                        self.buckets[index][id_str] = node
+                        return True
                 return False
             else:
                 self.buckets[index][id_str] = node
@@ -110,6 +117,6 @@ if __name__ == '__main__':
     id = str(hex(random.getrandbits(size)))[2:-1]
     buckets = Buckets(id, size, 20)
     print str(buckets.id)
-    #for i in range(100000):
-    #    id = str(hex(random.getrandbits(size)))[2:-1]
-    #    buckets.add_refresh_node(node={'id': id, 'ip': '10.2.1.2', 'port': '1'})
+    for i in range(50):
+        id = str(hex(random.getrandbits(size)))[2:-1]
+        buckets.add_refresh_node(node={'id': id, 'ip': '10.2.1.2', 'port': '1'})

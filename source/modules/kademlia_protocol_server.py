@@ -120,6 +120,10 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
         res = self.prepare_reply('FIND_STORE_REPLY')
         node = {'id': self.req['SID'], 'ip': self.client_address[0], 'port': self.client_address[1]}
         self.buckets.add_refresh_node(node)
+        if req['KX_INFO']:
+            # TODO: here read from config file the ip/port number of KX layer
+            kx = {'ip' : "TEST", 'port' : "TEST"}
+            res['KX_INFO'] = kx
         nodes = self.buckets.get_closest_nodes(self.req['Key'], self.buckets.ksize)
         res['Nodes'] = nodes
         return res
@@ -178,10 +182,24 @@ class KademliaProtocolServer(SocketServer.UDPServer):
 
         SocketServer.UDPServer.__init__(self, server_address, handler_class)
         SocketServer.UDPServer.allow_reuse_address = True
+        # TODO: make sure wakeup call is in the right place
+        self.wakeup()
 
     def server_activate(self):
         self.logger.debug('server_activate')
         SocketServer.UDPServer.server_activate(self)
+
+    def wakeup(self):
+        # try to ping a predetermined bootstrapper node
+        # the following 3 parameters are taken from config file
+        id = "TEST" # TODO: read id from config file
+        ip = "TEST" # TODO: read id from config file
+        port = "TEST" # TODO: read id from config file
+        if KademliaProtocolServer.ping(id,ip,port):
+            node = {'id': id, 'ip': ip, 'port': port}
+            self.buckets.add_refresh_node(node)
+            self.node_lookup(self.id,3)
+        # nothing to do, you are the first node to enter the network.
 
     def serve_forever(self):
         try:
@@ -238,9 +256,11 @@ class KademliaProtocolServer(SocketServer.UDPServer):
             replication = request['replication']
             i = 0
             return {'all_ok': True}
+            # 3 is called alpha in kademlia specification and is recommended by the authors to be 3
             target_nodes = self.node_lookup(id, 3)
             for node in target_nodes:
                 if store(node['id'], node['ip'], node['port'], key, value, ttl):
+                    # i is the number of stores successful
                     i += 1
                     if i == replication:
                         break
@@ -250,6 +270,9 @@ class KademliaProtocolServer(SocketServer.UDPServer):
             return {'all_ok': True}
 
         def find_value(request):
+            # TODO: Do the same as in store request above, and delete the lines below
+            # TODO: in the algorithm of this function, the peer must decide if it is already storing the key/value pair in question
+            # by issuing a self.data_server.get(key), and checking the result
             from random import randrange
             from bitstring import BitArray
             content = BitArray(int=randrange(0, 1000), length=256)
@@ -260,6 +283,9 @@ class KademliaProtocolServer(SocketServer.UDPServer):
             self.logger.debug('process_dht_request->find_value.len(response["content"]): %s' % len(response['content']))
 
             return response
+
+        # TODO: add handlers for other functions like trace
+
 
         self.logger.debug('process_dht_request')
         self.logger.debug('received dht request: %s' % str(request))
@@ -310,7 +336,9 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         self.logger.debug('close_request(%s)', request_address)
         return SocketServer.UDPServer.close_request(self, request_address)
 
-    def node_lookup(self, id, alpha):
+    def node_lookup(self, id, alpha, KX_INFO):
+        # TODO: when calling find_node in this function, put the KX_INFO flag, to get the KX ip/port for DHT_TRACE
+        # TODO: figure out which nodes to return the KX_INFO of, read the specification of the project
         # get local neighbors in your own kbuckets
         local_peers = self.buckets.get_closest_nodes(id, alpha)
         # Super list of all nodes indexed by the distance of a node to the target id
@@ -328,12 +356,13 @@ class KademliaProtocolServer(SocketServer.UDPServer):
                 # node = tuple: (peer, contacted, replied)
                 node[1] = True
                 round_nodes.append(node)
+                # TODO:
                 # issue find_node() requests to all round_nodes
                 # for each peer that replies do:
-                    # round_nodes[!][2] = True
+                    # round_nodes[(index of peer tha replies)][2] = True
                 # for each reply add nodes to dict:
-                # if reply['id'] not in nodes:      << based on real ID
-                    # nodes[int(reply['id'], 16) ^ id] = (reply, False, False) << indexed based on distance
+                # if (int(reply['id'], 16) ^ id) not in nodes:      << remember nodes is indexed by distance of id to target id
+                    # nodes[int(reply['id'], 16) ^ id] = (reply, False, False) << add new node to nodes super list
 
         # BEGIN ROUND
         while 1:
@@ -359,12 +388,13 @@ class KademliaProtocolServer(SocketServer.UDPServer):
             # check if there are new nodes to query, if not, node_lookup is complete
             if not round_nodes:
                 break
+            # TODO:
             # issue find_node() requests to all round_nodes
-                    # for each peer that replies do:
-                        # round_nodes[!][2] = True
-                    # for each reply add nodes to dict:
-                    # if reply['id'] not in nodes:      << based on real ID
-                        # nodes[int(reply['id'], 16) ^ id] = (reply, False, False) << indexed based on distance
+                # for each peer that replies do:
+                    # round_nodes[(index of peer tha replies)][2] = True
+                # for each reply add nodes to dict:
+                # if (int(reply['id'], 16) ^ id) not in nodes:      << remember nodes is indexed by distance of id to target id
+                    # nodes[int(reply['id'], 16) ^ id] = (reply, False, False) << add new node to nodes super list
 
         # END ROUND
         result = []
@@ -372,6 +402,7 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         for i in range(self.buckets.ksize):
             result.append(sorted_nodes[i])
         return result
+
     # TODO: add a static method for sending through sockets and getting the replies back
 
     @staticmethod
@@ -483,6 +514,7 @@ class KademliaProtocolServer(SocketServer.UDPServer):
             if not res.has_key(key):
                 return False, 'response with required keys missing'
         # TODO: verify SID/RID combination
+        # TODO: verify if MID of request is returned in response
         return True, ''
 
 
