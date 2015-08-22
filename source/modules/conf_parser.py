@@ -45,6 +45,9 @@ def read_conf():
 
     dht_properties = config_section_map(config_parser, 'DHT')
 
+
+    config.PUBLIC_KEY_PATH = dht_properties['public_key_path']
+
     config.PORT = int(dht_properties['port'])
     config.PEER_PORT = int(dht_properties['peer_port'])
     config.HOSTNAME = dht_properties['hostname']

@@ -157,7 +157,6 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
 
 class KademliaProtocolServer(SocketServer.UDPServer):
 
-    peer_id = "1BCD77AFF8391729182DC63AFFFFF319000567AA"
     def __init__(self,
                  request_q,
                  response_q,
@@ -171,13 +170,14 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         self.response_q = response_q
         self.err_q = err_q
         # TODO: change 20 to a global constant K
-        self.buckets = buckets.Buckets(KademliaProtocolServer.peer_id, 160, 20)
+        self.buckets = buckets.Buckets(config.PEER_ID, 160, 20)
         self.data_server = DataServer()
 
         self.kbuckets_maintainer = Thread(target=kbuckets_maintainer, args=(self.buckets, self.err_q))
         self.kbuckets_maintainer.start()
 
         SocketServer.UDPServer.__init__(self, server_address, handler_class)
+        SocketServer.UDPServer.allow_reuse_address = True
 
     def server_activate(self):
         self.logger.debug('server_activate')
@@ -220,7 +220,7 @@ class KademliaProtocolServer(SocketServer.UDPServer):
                 pass
             except Exception as e:
                 exception = (e, self.thread_name)
-                err_q.put(exception)
+                self.err_q.put(exception)
 
             try:
                 self.handle_request()
@@ -232,12 +232,12 @@ class KademliaProtocolServer(SocketServer.UDPServer):
 
     def process_dht_request(self, request):
         def store(request):
-
             key = request['key']
             value = request['value']
             ttl = request['ttl']
             replication = request['replication']
             i = 0
+            return {'all_ok': True}
             target_nodes = self.node_lookup(id, 3)
             for node in target_nodes:
                 if store(node['id'], node['ip'], node['port'], key, value, ttl):
@@ -255,7 +255,7 @@ class KademliaProtocolServer(SocketServer.UDPServer):
             content = BitArray(int=randrange(0, 1000), length=256)
             self.logger.debug('process_dht_request->find_value.str(content): %s' % str(content))
             self.logger.debug('process_dht_request->find_value.len(str(content)): %s' % len(str(content)))
-            response = { 'content': str(content),
+            response = { 'content': content.tobytes(),
                          'all_ok': True }
             self.logger.debug('process_dht_request->find_value.len(response["content"]): %s' % len(response['content']))
 
@@ -387,7 +387,7 @@ class KademliaProtocolServer(SocketServer.UDPServer):
     @staticmethod
     def ping(id, ip, port):
         req = KademliaProtocolServer.prepare_req('PING')
-        
+
         req['RID'] = str(id)
 
         # Connect to the peer

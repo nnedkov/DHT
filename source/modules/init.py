@@ -9,8 +9,8 @@ import sys
 from utilities import exit_gracefully
 from conf_parser import read_conf
 
-from kademlia_protocol_server import KademliaProtocolRequestHandler, KademliaProtocolServer
-from dht_api_server import DHTAPIRequestHandler, DHTAPIServer
+from kademlia_protocol_server import KademliaProtocolServer
+from dht_api_server import DHTAPIServer
 import config
 
 
@@ -52,6 +52,20 @@ def check_args():
                 exit_gracefully(message)
 
 
+def determine_peer_id():
+    from hashlib import sha256
+
+    try:
+        public_key = open(config.PUBLIC_KEY_PATH, 'rb').read()
+    except IOError:
+        message = 'Public key path is set to: %s\n' % config.PUBLIC_KEY_PATH
+        message += 'If incorrect, please update file: %s' % config.CONFIG_PATH
+        exit_gracefully(message)
+
+    config.PEER_ID = sha256(public_key).hexdigest()
+    logger.debug('Peer id: %s - %s' % (config.PEER_ID, type(config.PEER_ID)))
+
+
 def wait_threads_exit(threads):
 
     logger.info('waiting threads to exit')
@@ -76,24 +90,23 @@ def init_servers():
     err_q = Queue()
 
     # Create a thread for kademlia server
-    address = (config.HOSTNAME, config.PORT)
+    address = ('', config.PEER_PORT)
     kademlia_server = KademliaProtocolServer(request_q,
                                              response_q,
                                              err_q,
-                                             address,
-                                             KademliaProtocolRequestHandler)
+                                             address)
     t = Thread(target=kademlia_server.serve_forever)
     threads.append(t)
 
     # Create a thread for DHT server
-    address = (config.HOSTNAME, config.PEER_PORT)
+    address = ('', config.PORT)
     dht_server = DHTAPIServer(request_q,
                               response_q,
                               err_q,
-                              address,
-                              DHTAPIRequestHandler)
+                              address)
     t = Thread(target=dht_server.serve_forever)
     threads.append(t)
+
 
     for t in threads:
         t.start()
@@ -125,4 +138,5 @@ if __name__ == '__main__':
     set_signal_trapping()
     check_args()
     read_conf()
+    determine_peer_id()
     init_servers()

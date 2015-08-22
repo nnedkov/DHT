@@ -5,10 +5,9 @@ High priority:
 		* add functionality in maintain_til_shutdown function (maintenance of buckets)
 
 	NEDKO:
+		* fill out GET_TRACE
+		* find-node-lookup
 		* set timeout in ping, store (and generally anything that deals with sockets)
-		* sending the key through socket as a string or as bits? check: http://stackoverflow.com/questions/142812/does-python-have-a-bitfield-type
-		* servers don't bind the correct port
-		* reserved bits
 		* TUM Informatics: ask for testing code
 
 Low priority:
