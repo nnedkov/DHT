@@ -12,12 +12,12 @@ logging.basicConfig(level=config.LOG_LEVEL,
 
 
 class Buckets:
-    def __init__(self, id, length, ksize):
+    def __init__(self, length, ksize):
         self.logger = logging.getLogger('Bucket')
         self.logger.debug('__init__')
 
         self.ksize = ksize  # k in kademlia
-        self.id = int(id, 16)
+        self.id = config.PEER_ID
         self.length = length  # key space size
         self.buckets = dict()
 

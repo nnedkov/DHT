@@ -62,7 +62,7 @@ def determine_peer_id():
         message += 'If incorrect, please update file: %s' % config.CONFIG_PATH
         exit_gracefully(message)
 
-    config.PEER_ID = sha256(public_key).hexdigest()
+    config.PEER_ID = int(sha256(public_key).hexdigest(), 16)
     logger.debug('Peer id: %s - %s' % (config.PEER_ID, type(config.PEER_ID)))
 
 
