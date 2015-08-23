@@ -63,7 +63,16 @@ def determine_peer_id():
         exit_gracefully(message)
 
     config.PEER_ID = int(sha256(public_key).hexdigest(), 16)
-    logger.debug('Peer id: %s - %s' % (config.PEER_ID, type(config.PEER_ID)))
+
+
+def output_config_vars():
+    logger.debug('PEER ID: %s - %s' % (config.PEER_ID, type(config.PEER_ID)))
+    logger.info('PUBLIC_KEY_PATH: %s' % config.PUBLIC_KEY_PATH)
+    logger.info('KX_PORT: %s' % config.KX_PORT)
+    logger.info('KX_HOSTNAME: %s' % config.KX_HOSTNAME)
+    logger.info('PORT: %s' % config.PORT)
+    logger.info('KADEM_PORT: %s' % config.KADEM_PORT)
+    logger.info('HOSTNAME: %s' % config.HOSTNAME)
 
 
 def wait_threads_exit(threads):
@@ -90,7 +99,7 @@ def init_servers():
     err_q = Queue()
 
     # Create a thread for kademlia server
-    address = ('', config.PEER_PORT)
+    address = ('', config.KADEM_PORT)
     kademlia_server = KademliaProtocolServer(request_q,
                                              response_q,
                                              err_q,
@@ -139,4 +148,5 @@ if __name__ == '__main__':
     check_args()
     read_conf()
     determine_peer_id()
+    output_config_vars()
     init_servers()

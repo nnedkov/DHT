@@ -5,15 +5,18 @@ LOG_LEVEL = logging.DEBUG
 CONFIG_PATH = '../config/dht.conf'
 SHUT_DOWN = 0
 
-HOSTNAME = 'localhost'
-PORT = 50160
-PEER_PORT = 50161
-
 PUBLIC_KEY_PATH = ''
 PEER_ID = '18403bb44d4dda2bdfc9487bf384e056bc72fa94377d363f94e1015f237db870'
 
-OVERLAY_HOSTNAME = 'something1'
-HOSTLIST = 'something2'
+HOSTNAME = 'localhost'
+PORT = 50160
+KADEM_PORT = 50161
+
+OVERLAY_HOSTNAME = ''
+HOSTLIST = ''
+
+KX_HOSTNAME = 'localhost'
+KX_PORT = 49160
 
 # the duration of period servers check the SHUT_DOWN flag
 SHUT_DOWN_PERIOD = 1

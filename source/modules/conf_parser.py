@@ -41,13 +41,16 @@ def read_conf():
     config_parser.read(config.CONFIG_PATH)
 
     logger.debug('detected sections (%s): %s' % (config.CONFIG_PATH,
-                                                                config_parser.sections()))
+                                                 config_parser.sections()))
 
-    dht_properties = config_section_map(config_parser, 'DHT')
-
-
+    dht_properties = config_section_map(config_parser, 'COMMON')
     config.PUBLIC_KEY_PATH = dht_properties['public_key_path']
 
+    dht_properties = config_section_map(config_parser, 'KX')
+    config.KX_PORT = int(dht_properties['port'])
+    config.KX_HOSTNAME = dht_properties['hostname']
+
+    dht_properties = config_section_map(config_parser, 'DHT')
     config.PORT = int(dht_properties['port'])
-    config.PEER_PORT = int(dht_properties['peer_port'])
+    config.KADEM_PORT = int(dht_properties['kadem_port'])
     config.HOSTNAME = dht_properties['hostname']
