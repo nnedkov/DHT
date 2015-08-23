@@ -310,11 +310,6 @@ class DHTAPIServer(SocketServer.TCPServer):
 
         self.logger.info('shutting down...')
 
-    def process_kademlia_response(self, response):
-        self.logger.debug('process_dht_request')
-        self.logger.debug('received kademlia response: %s' % str(response))
-        # TODO: add functionality for response processing
-
     def test_req_issuing_to_kademlia(self, req_num):
         # Test DHT-server request issuing to kademlia
         for req_id in range(req_num):

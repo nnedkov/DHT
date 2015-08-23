@@ -1,0 +1,11 @@
+INSTALL:
+	Two external libraries will need to be installed:
+	* python-bson library (for sending bson objects through the sockets)
+	  install by typing:
+		$ sudo apt-get install python-bson
+	* bitarray 0.8.1 library (for easier bit manipulation)
+	  install by typing:
+		$ wget https://pypi.python.org/packages/source/b/bitarray/bitarray-0.8.1.tar.gz
+		$ tar xvf bitarray-0.8.1.tar.gz
+		$ cd bitarray-0.8.1/
+		$ python setup.py

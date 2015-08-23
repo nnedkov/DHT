@@ -21,7 +21,7 @@ logger = logging.getLogger('Init (main thread)')
 
 
 def set_signal_trapping():
-    # TODO: other exit signals?
+
     exit_signals = [SIGINT,   # (Ctrl+C)
                    ]
     for sig in exit_signals:
