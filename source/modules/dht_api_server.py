@@ -146,7 +146,7 @@ class DHTAPIRequestHandler(SocketServer.BaseRequestHandler):
         self.logger.debug('response type: %s' % config.MSG_DHT_GET_REPLY)
         self.logger.debug('key: %s' % '0x' + ''.join([hex(ord(i)) for i in self.key]).replace('x00', '00').replace('0x', ''))
         self.logger.debug('content: %s' % '0x' + ''.join([hex(ord(i)) for i in content]).replace('x00', '00').replace('0x', ''))
-        self.logger.debug('total response size: %s' % calcsize(pack_str))
+
 
     def trace_reply(self):
         self.logger.debug('trace_reply')
@@ -174,26 +174,35 @@ class DHTAPIRequestHandler(SocketServer.BaseRequestHandler):
             self.response = self.error()
             return
 
-        # TODO: modify below functionality
+        trace_recs = res['trace']
 
-#        content = res['content']
-#        self.logger.debug('get_reply.len(str(content)): %s' % len(content))
-#
-#        pack_str = 'HH32s%ss' % int(len(content))
-#        self.response = pack(pack_str,
-#                             socket.htons(calcsize(pack_str)),
-#                             socket.htons(config.MSG_DHT_GET_REPLY),
-#                             self.key,
-#                             content)
-#
-#        self.logger.debug('pack_str: %s' % pack_str)
-#        self.logger.debug('total response size: %s' % calcsize(pack_str))
-#        self.logger.debug('response type: %s' % config.MSG_DHT_GET_REPLY)
-#        self.logger.debug('key: %s' % '0x' + ''.join([hex(ord(i)) for i in self.key]).replace('x00', '00').replace('0x', ''))
-#        self.logger.debug('content: %s' % '0x' + ''.join([hex(ord(i)) for i in content]).replace('x00', '00').replace('0x', ''))
-#        self.logger.debug('total response size: %s' % calcsize(pack_str))
+        pack_str = 'HH32s'
+        to_be_packed = [ socket.htons(config.MSG_DHT_TRACE_REPLY),
+                         self.key ]
 
-        self.response = None
+        for trace_rec in trace_recs:
+            pack_str += '32sHH4s16s'
+            to_be_packed += [ trace_rec['peer_ID'],
+                              socket.htons(trace_rec['KX_port']),
+                              socket.htons(0),
+                              trace_rec['IPv4_address'],
+                              trace_rec['IPv6_address'] ]
+
+        to_be_packed.insert(0, socket.htons(calcsize(pack_str)))
+
+        self.logger.debug('pack_str: %s' % pack_str)
+        self.logger.debug('total response size: %s' % calcsize(pack_str))
+        self.logger.debug('response type: %s' % config.MSG_DHT_TRACE_REPLY)
+        self.logger.debug('key: %s' % '0x' + ''.join([hex(ord(i)) for i in self.key]).replace('x00', '00').replace('0x', ''))
+
+        for trace_rec in trace_recs:
+            self.logger.debug('peer_ID: %s' % '0x' + ''.join([hex(ord(i)) for i in trace_rec['peer_ID']]).replace('x00', '00').replace('0x', ''))
+            self.logger.debug('KX_port: %s' % trace_rec['KX_port'])
+            self.logger.debug('IPv4_address: %s' % '0x' + ''.join([hex(ord(i)) for i in trace_rec['IPv4_address']]).replace('x00', '00').replace('0x', ''))
+            self.logger.debug('IPv6_address: %s' % '0x' + ''.join([hex(ord(i)) for i in trace_rec['IPv6_address']]).replace('x00', '00').replace('0x', ''))
+
+        self.response = pack(pack_str, *to_be_packed)
+
 
     def error(self):
         self.logger.debug('error')
@@ -389,13 +398,13 @@ def issue_dht_put(logger):
 
     # Send the data
     logger.debug('sending the DHT PUT request')
-    len_sent = s.send(dht_put)
+    s.send(dht_put)
 
     # Receive a response
     logger.debug('waiting for response')
     res_header = s.recv(4)
 
-    logger.debug('response lenght: %s' % len(res_header))
+    logger.debug('response length: %s' % len(res_header))
 
     if len(res_header) == 0:
         clean_up()
@@ -442,13 +451,13 @@ def issue_dht_get(logger):
 
     # Send the data
     logger.debug('sending the DHT GET request')
-    len_sent = s.send(dht_get)
+    s.send(dht_get)
 
     # Receive a response
     logger.debug('waiting for response')
     res_header = s.recv(4)
 
-    logger.debug('response lenght: %s' % len(res_header))
+    logger.debug('response length: %s' % len(res_header))
 
     if len(res_header) == 0:
         clean_up()
@@ -508,13 +517,13 @@ def issue_dht_trace(logger):
 
     # Send the data
     logger.debug('sending the DHT TRACE request')
-    len_sent = s.send(dht_get)
+    s.send(dht_get)
 
     # Receive a response
     logger.debug('waiting for response')
     res_header = s.recv(4)
 
-    logger.debug('response lenght: %s' % len(res_header))
+    logger.debug('response length: %s' % len(res_header))
 
     if len(res_header) == 0:
         clean_up()
@@ -535,13 +544,19 @@ def issue_dht_trace(logger):
             res_body += s.recv(16384)
             amount_received = len(res_header) + len(res_body)
 
-        # TODO: modify below
+        trace_recs_num = (len(res_body)-calcsize('32s'))/calcsize('32sHH4s16s')
+        logger.debug('trace_recs_num: %s' % trace_recs_num)
+        pack_str = '32s' + trace_recs_num * '32sHH4s16s'
+        unpacked_response = unpack(pack_str, res_body)
+        logger.debug('pack_str: %s' % pack_str)
+        logger.debug('key: %s' % '0x' + ''.join([hex(ord(i)) for i in unpacked_response[0]]).replace('x00', '00').replace('0x', ''))
+        logger.debug('len(unpacked_response): %s' % str(len(unpacked_response)))
 
-#        pack_str = '32s%ss' % (len(res_body)-calcsize('32s'))
-#        unpacked_response = unpack(pack_str, res_body)
-#        logger.debug('pack_str: %s' % pack_str)
-#        logger.debug('key: %s' % '0x' + ''.join([hex(ord(i)) for i in unpacked_response[0]]).replace('x00', '00').replace('0x', ''))
-#        logger.debug('content: %s' % '0x' + ''.join([hex(ord(i)) for i in unpacked_response[1]]).replace('x00', '00').replace('0x', ''))
+        for i in range(trace_recs_num):
+            logger.debug('peer_ID: %s' % '0x' + ''.join([hex(ord(j)) for j in unpacked_response[i*5+1]]).replace('x00', '00').replace('0x', ''))
+            logger.debug('KX_port: %s' % socket.ntohs(unpacked_response[i*5+2]))
+            logger.debug('IPv4_address: %s' % '0x' + ''.join([hex(ord(j)) for j in unpacked_response[i*5+4]]).replace('x00', '00').replace('0x', ''))
+            logger.debug('IPv6_address: %s' % '0x' + ''.join([hex(ord(j)) for j in unpacked_response[i*5+5]]).replace('x00', '00').replace('0x', ''))
 
 
 if __name__ == '__main__':
@@ -551,6 +566,6 @@ if __name__ == '__main__':
     print
     logger.debug('issuing DHT GET')
     issue_dht_get(logger)
-#    print
-#    logger.debug('issuing DHT TRACE')
-#    issue_dht_trace(logger)
+    print
+    logger.debug('issuing DHT TRACE')
+    issue_dht_trace(logger)

@@ -20,7 +20,7 @@ logging.basicConfig(level=config.LOG_LEVEL,
 
 def kbuckets_maintainer(buckets, err_q):
 
-    def maintain_til_shutdown(buckets):
+    def maintain_til_shutdown(buckets, logger):
         while not config.SHUT_DOWN:
             # TODO: set ping flags in the kbuckets - ping peers
             logger.debug('sleeping for a bit')
@@ -31,7 +31,7 @@ def kbuckets_maintainer(buckets, err_q):
     thread_name = 'kbuckets_maintainer'
 
     try:
-        maintain_til_shutdown(buckets)
+        maintain_til_shutdown(buckets, logger)
     except Exception as e:
         logger.debug('Exception occured: %s' % str(e))
         exception = (e, thread_name)
@@ -44,8 +44,8 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
         self.logger = logging.getLogger('KademliaProtocolRequestHandler')
         self.logger.debug('__init__')
         # key -> RPC identifier, value -> [RPC handler, [keys the bson obj should have]]
-        self.RPCs = { 'PING': [self.pong, ['MID', 'SID', 'RID']],
-                      'STORE': [self.store_reply, ['MID', 'SID', 'RID', 'Key', 'TTL', 'Value']],
+        self.RPCs = { 'PING': [self.pong, ['MID', 'SID', 'RID', 'IP', 'PORT']],
+                      'STORE': [self.store_reply, ['MID', 'SID', 'RID', 'Key', 'TTL', 'Value', 'IP', 'PORT']],
                       'FIND_NODE': [self.find_node_reply, ['MID', 'SID', 'RID', 'KX_INFO', 'Key']],
                       'FIND_VALUE': [self.find_value_reply, ['MID', 'SID', 'RID', 'Key']],
                       'VERIFY': [self.verify_reply, ['MID', 'SID', 'RID', 'Challenge']] }
@@ -76,7 +76,6 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
         res = RPC_handler()
 
         socket.sendto(dumps(res), self.client_address)
-        socket.close()
 
     def req_is_valid(self):
         try:
@@ -94,20 +93,33 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
             # TODO: verify value types
             if not self.req.has_key(key):
                 return False, 'request with required keys missing'
+
         if self.req['RID'] != str(self.buckets.id):
-            return False, 'invalid RID'
+            return False, 'request routed to wrong peer (peer id is not %s)'
         # TODO: think if we need to check SID/IP combination by looking into buckets
+
+        if self.req.has_key('Key'):
+            try:
+                int(self.req['Key'], 16)
+            except ValueError:
+                return False, 'given key is not in Hex format'
+
         return True, ''
 
     def pong(self):
         res = self.prepare_reply('PONG')
-        node = {'id':  self.req['SID'], 'ip': self.client_address[0], 'port': self.client_address[1]}
+        node = { 'id':  self.req['SID'],
+                 'ip': self.req['IP'],
+                 'port': self.req['PORT'] }
+
         self.buckets.add_refresh_node(node)
         return res
 
     def store_reply(self):
         res = self.prepare_reply('STORE_REPLY')
-        node = {'id':self.req['SID'], 'ip': self.client_address[0], 'port': self.client_address[1]}
+        node = { 'id': self.req['SID'],
+                 'ip': self.req['IP'],
+                 'port': self.req['PORT'] }
         self.buckets.add_refresh_node(node)
         if self.req['TTL'] > 43200:  # Max duration
             res['Status'] = -1
@@ -118,7 +130,9 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
 
     def find_node_reply(self):
         res = self.prepare_reply('FIND_STORE_REPLY')
-        node = {'id': self.req['SID'], 'ip': self.client_address[0], 'port': self.client_address[1]}
+        node = { 'id': self.req['SID'],
+                 'ip': self.client_address[0],
+                 'port': self.client_address[1] }
         self.buckets.add_refresh_node(node)
         nodes = self.buckets.get_closest_nodes(self.req['Key'], self.buckets.ksize)
         res['Nodes'] = nodes
@@ -126,7 +140,9 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
 
     def find_value_reply(self):
         res = self.prepare_reply('FIND_VALUE_REPLY')
-        node = {'id': self.req['SID'], 'ip': self.client_address[0], 'port': self.client_address[1]}
+        node = { 'id': self.req['SID'],
+                 'ip': self.client_address[0],
+                 'port': self.client_address[1] }
         self.buckets.add_refresh_node(node)
         value = self.data_server.get(self.req['Key'])
         if value is None:
@@ -137,7 +153,9 @@ class KademliaProtocolRequestHandler(SocketServer.BaseRequestHandler):
 
     def verify_reply(self):
         res = self.prepare_reply('VERIFY_REPLY')
-        node = {'id': self.req['SID'], 'ip': self.client_address[0], 'port': self.client_address[1]}
+        node = { 'id': self.req['SID'],
+                 'ip': self.client_address[0],
+                 'port': self.client_address[1] }
         self.buckets.add_refresh_node(node)
         res['Challenge_Reply'] = verify.work(self.req['Challenge'])
         return res
@@ -170,7 +188,7 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         self.response_q = response_q
         self.err_q = err_q
         # TODO: change 20 to a global constant K
-        self.buckets = buckets.Buckets(config.PEER_ID, 160, 20)
+        self.buckets = buckets.Buckets(256, 1)
         self.data_server = DataServer()
 
         self.kbuckets_maintainer = Thread(target=kbuckets_maintainer, args=(self.buckets, self.err_q))
@@ -219,12 +237,14 @@ class KademliaProtocolServer(SocketServer.UDPServer):
             except Queue.Empty:
                 pass
             except Exception as e:
+                self.logger.debug('Exception occured: %s' % str(e))
                 exception = (e, self.thread_name)
                 self.err_q.put(exception)
 
             try:
                 self.handle_request()
             except Exception as e:
+                self.logger.debug('Exception occured: %s' % str(e))
                 exception = (e, self.thread_name)
                 self.err_q.put(exception)
 
@@ -252,12 +272,43 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         def find_value(request):
             from random import randrange
             from bitstring import BitArray
+
             content = BitArray(int=randrange(0, 1000), length=256)
             self.logger.debug('process_dht_request->find_value.str(content): %s' % str(content))
             self.logger.debug('process_dht_request->find_value.len(str(content)): %s' % len(str(content)))
             response = { 'content': content.tobytes(),
                          'all_ok': True }
             self.logger.debug('process_dht_request->find_value.len(response["content"]): %s' % len(response['content']))
+
+            return response
+
+        def trace(request):
+            from random import randrange
+            from bitstring import BitArray
+
+            trace_recs_num = randrange(2, 5)
+            trace_recs = []
+            for i in range(trace_recs_num):
+
+                peer_ID = BitArray(int=randrange(0, 1000), length=256)
+                KX_port = randrange(10000, 20000)
+                IPv4_address = BitArray(int=randrange(0, 1000), length=32)
+                IPv6_address = BitArray(int=randrange(0, 1000), length=128)
+
+                trace_rec = { 'peer_ID': peer_ID.tobytes(),
+                              'KX_port': KX_port,
+                              'IPv4_address': IPv4_address.tobytes(),
+                              'IPv6_address': IPv6_address.tobytes() }
+                trace_recs.append(trace_rec)
+
+                self.logger.debug('process_dht_request->trace.str(peer_ID): %s' % str(peer_ID))
+                self.logger.debug('process_dht_request->trace.str(KX_port): %s' % str(KX_port))
+                self.logger.debug('process_dht_request->trace.str(IPv4_address): %s' % str(IPv4_address))
+                self.logger.debug('process_dht_request->trace.str(IPv6_address): %s' % str(IPv6_address))
+
+            response = { 'trace': trace_recs,
+                         'all_ok': True }
+            self.logger.debug('process_dht_request->find_value.len(response["trace"]): %s' % len(response['trace']))
 
             return response
 
@@ -269,7 +320,8 @@ class KademliaProtocolServer(SocketServer.UDPServer):
 #                             config.MSG_DHT_GET: KademliaProtocolRequestHandler.find_value,
 #                             config.MSG_DHT_TRACE: KademliaProtocolRequestHandler.?}
         request_handlers = { config.MSG_DHT_PUT: store,
-                             config.MSG_DHT_GET: find_value}
+                             config.MSG_DHT_GET: find_value,
+                             config.MSG_DHT_TRACE: trace }
 
         request_handler = request_handlers[request['type']]
         del request['type']
@@ -352,7 +404,7 @@ class KademliaProtocolServer(SocketServer.UDPServer):
             if i == 0:
                 while i < self.buckets.ksize and i < len(sorted_nodes):
                     if not sorted_nodes[i][1][1]:
-                        round_nodes.append(sorted_nodes[j][1])
+                        round_nodes.append(sorted_nodes[i][1])
                         round_nodes[-1][1] = True
                         nodes[sorted_nodes[i][0]][1] = True
 
@@ -379,9 +431,9 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         req = dict()
         req['TYPE'] = msg_type
         req['MID'] = str(hex(random.getrandbits(160)))[2:-1]
-        #req['SID'] = str(self.buckets.id)
-        return req
+        req['SID'] = str(config.PEER_ID)
 
+        return req
 
 
     @staticmethod
@@ -389,16 +441,28 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         req = KademliaProtocolServer.prepare_req('PING')
 
         req['RID'] = str(id)
+        req['IP'] = config.HOSTNAME
+        req['PORT'] = config.PEER_PORT
+
+        address = (ip, port)
+        logger.info('server on %s:%s', address[0], address[1])
 
         # Connect to the peer
-        address = (ip, port)
+        logger.debug('creating socket')
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        logger.debug('connecting to server')
         s.connect(address)
 
+        # Send the data
         req_bson = dumps(req)
+        logger.debug('sending data: "%s"', req_bson)
         s.send(req_bson)
 
+        # Receive a response
+        logger.debug('waiting for response')
         response = s.recv(16384)
+        logger.debug('response from server: "%s"', response)
+
         s.close()
 
         if len(response) == 0:
@@ -417,16 +481,25 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         req['Key'] = key
         req['Value'] = value
         req['TTL'] = ttl
+        req['IP'] = config.HOSTNAME
+        req['PORT'] = config.PEER_PORT
 
         # Connect to the peer
+        logger.debug('creating socket')
         address = (ip, port)
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        logger.debug('connecting to server')
         s.connect(address)
 
         req_bson = dumps(req)
+        logger.debug('sending data: "%s"', req_bson)
         s.send(req_bson)
 
+        # Receive a response
+        logger.debug('waiting for response')
         response = s.recv(16384)
+        logger.debug('response from server: "%s"', response)
+
         s.close()
 
         if len(response) == 0:
@@ -486,30 +559,16 @@ class KademliaProtocolServer(SocketServer.UDPServer):
         return True, ''
 
 
-if __name__ == '__main__':
+def issue_ping(logger):
+    def clean_up():
+        # Clean up
+        logger.debug('closing socket')
+        s.close()
+        logger.debug('done')
 
-    from threading import Thread
-    import socket
-    from time import sleep
-
-    request_q = Queue.Queue()
-    response_q = Queue.Queue()
-    err_q = Queue.Queue()
+    # Test Kademlia-server request handling from a Kademlia peer
     address = (config.HOSTNAME, config.PEER_PORT)
-    SocketServer.UDPServer.allow_reuse_address = 1
-    server = KademliaProtocolServer(request_q,
-                                    response_q,
-                                    err_q,
-                                    address,
-                                    KademliaProtocolRequestHandler)
-
-    t = Thread(target=server.serve_forever)
-    #t.setDaemon(True) # terminate when the main thread ends
-    t.start()
-
-    # Test kademlia request handling from a peer
-    logger = logging.getLogger('Client')
-    logger.info('Server on %s:%s', address[0], address[1])
+    logger.info('server on %s:%s', address[0], address[1])
 
     # Connect to the server
     logger.debug('creating socket')
@@ -518,24 +577,121 @@ if __name__ == '__main__':
     s.connect(address)
 
     # Send the data
-    store_req = {'TYPE': 'PING',
-                 'MID': '1BCD77AFF8391729182DC63',
-                 'SID': '1BCD77AFF8391729182DC63AFFFFF319000567AB',
-                 'RID': '1BCD77AFF8391729182DC63AFFFFF319000567AA'
-                 }
+    store_req = { 'TYPE': 'PING',
+                  'MID': '1BCD77AFF8391729182DC63',
+                  'SID': str(int(config.PEER_ID.replace('d', 'a'), 16)),
+                  'RID': str(int(config.PEER_ID, 16)),
+                  'IP': config.HOSTNAME,
+                  'PORT': config.PEER_PORT }
     store_req_bson = dumps(store_req)
     logger.debug('sending data: "%s"', store_req)
-    len_sent = s.send(store_req_bson)
+    s.send(store_req_bson)
 
     # Receive a response
     logger.debug('waiting for response')
-    response = s.recv(len_sent)
+    response = s.recv(16384)
     logger.debug('response from server: "%s"', response)
 
-    # Clean up
-    logger.debug('closing socket')
-    s.close()
-    config.SHUT_DOWN = 1
-    sleep(3)
-    logger.debug('done')
-    server.socket.close()
+
+def issue_store(logger, key, value):
+    def clean_up():
+        # Clean up
+        logger.debug('closing socket')
+        s.close()
+        logger.debug('done')
+
+    # Test Kademlia-server request handling from a Kademlia peer
+    address = (config.HOSTNAME, config.PEER_PORT)
+    logger.info('server on %s:%s', address[0], address[1])
+
+    # Connect to the server
+    logger.debug('creating socket')
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    logger.debug('connecting to server')
+    s.connect(address)
+
+    # Send the data
+    store_req = { 'TYPE': 'STORE',
+                  'MID': '1BCD77AFF8391729182DC63',
+                  'SID': str(int(config.PEER_ID.replace('d', 'a'), 16)),
+                  'RID': str(int(config.PEER_ID, 16)),
+                  'TTL': 10,
+                  'Key': key,
+                  'Value': value,
+                  'IP': config.HOSTNAME,
+                  'PORT': config.PEER_PORT }
+
+    store_req_bson = dumps(store_req)
+    logger.debug('sending data: "%s"', store_req)
+    s.send(store_req_bson)
+
+    # Receive a response
+    logger.debug('waiting for response')
+    response = s.recv(16384)
+    logger.debug('response from server: "%s"', response)
+
+
+def issue_find_value(logger, key):
+    def clean_up():
+        # Clean up
+        logger.debug('closing socket')
+        s.close()
+        logger.debug('done')
+
+    # Test Kademlia-server request handling from a Kademlia peer
+    address = (config.HOSTNAME, config.PEER_PORT)
+    logger.info('server on %s:%s', address[0], address[1])
+
+    # Connect to the server
+    logger.debug('creating socket')
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    logger.debug('connecting to server')
+    s.connect(address)
+
+    # Send the data
+    store_req = { 'TYPE': 'FIND_VALUE',
+                  'MID': '1BCD77AFF8391729182DC63',
+                  'SID': str(int(config.PEER_ID.replace('d', 'a'), 16)),
+                  'RID': str(int(config.PEER_ID, 16)),
+                  'Key': key }
+
+    store_req_bson = dumps(store_req)
+    logger.debug('sending data: "%s"', store_req)
+    s.send(store_req_bson)
+
+    # Receive a response
+    logger.debug('waiting for response')
+    response = s.recv(16384)
+    logger.debug('response from server: "%s"', response)
+
+
+if __name__ == '__main__':
+    import socket
+
+    logger = logging.getLogger('Kademlia Peer')
+    logger.debug('issuing PING')
+    issue_ping(logger)
+    print
+    logger.debug('issuing STORE')
+    issue_store(logger, 'aaaa', 'value1')
+    print
+    logger.debug('issuing FIND_VALUE')
+    issue_find_value(logger, 'aaaa')
+    print
+    logger.debug('issuing PING')
+    KademliaProtocolServer.ping(str(int(config.PEER_ID, 16)), config.HOSTNAME, config.PEER_PORT)
+    print
+    logger.debug('issuing STORE')
+    KademliaProtocolServer.store(str(int(config.PEER_ID, 16)), config.HOSTNAME, config.PEER_PORT, 'aaaa', 'value2', 10)
+    print
+    logger.debug('issuing FIND_VALUE')
+    issue_find_value(logger, 'aaaa')
+    print
+    logger.debug('issuing FIND_VALUE')
+    issue_find_value(logger, 'key2')
+    print
+    logger.debug('issuing STORE')
+    KademliaProtocolServer.store(str(int(config.PEER_ID, 16)), config.HOSTNAME, config.PEER_PORT, 'aaaab', 'value2', 10)
+    print
+    logger.debug('issuing FIND_VALUE')
+    issue_find_value(logger, 'aaaa')

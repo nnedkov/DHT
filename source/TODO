@@ -5,11 +5,11 @@ High priority:
 		* add functionality in maintain_til_shutdown function (maintenance of buckets)
 
 	NEDKO:
-		* fill out GET_TRACE
+		* KX-info in config
 		* find-node-lookup
 		* set timeout in ping, store (and generally anything that deals with sockets)
+
 		* TUM Informatics: ask for testing code
 
 Low priority:
 * bash script that installs all required packages
-
